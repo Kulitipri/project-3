@@ -4,6 +4,7 @@ Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train D
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
 **Trạng thái: tuần 1** — tìm hiểu đề tài và khảo sát bộ mẫu HDFS_2k bằng Drain3.
+Ghi chú tìm hiểu (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
 
 Pipeline dự kiến:
 
@@ -21,6 +22,8 @@ project-3/
 │   ├── config.yaml          # toàn bộ đường dẫn (đọc qua src/config.py)
 │   └── drain3_basic.ini     # Drain3 cơ bản: chỉ che mã block, IP, con số
 ├── data/raw/HDFS_2k/        # bộ mẫu 2.000 dòng (tự tải về, không đưa lên GitHub)
+├── documents/
+│   └── TUAN1_TIM_HIEU.md    # TUẦN 1: ghi chú tìm hiểu tài liệu và bộ dữ liệu
 ├── src/
 │   ├── config.py            # đọc config.yaml
 │   ├── utils.py             # logger, JSON
