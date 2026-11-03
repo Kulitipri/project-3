@@ -1,0 +1,21 @@
+# Môi trường Python
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Dữ liệu và kết quả (file lớn, không đưa lên GitHub)
+data/raw/*
+data/interim/*
+data/processed/*
+outputs/models/*
+outputs/results/*
+!**/.gitkeep
+
+# macOS
+.DS_Store
+
+# Báo cáo Word (không đưa lên GitHub)
+*.docx
+~$*
+data/

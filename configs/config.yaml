@@ -1,0 +1,7 @@
+# =============================================================
+# Cấu hình chung cho project DeepLog trên HDFS
+# Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
+# =============================================================
+paths:
+  results_dir: outputs/results
+  figures_dir: outputs/figures
