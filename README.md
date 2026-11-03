@@ -3,8 +3,9 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 1** — tìm hiểu đề tài và khảo sát bộ mẫu HDFS_2k bằng Drain3.
-Ghi chú tìm hiểu (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
+**Trạng thái: tuần 2** — parse toàn bộ HDFS_v1 bằng Drain3 và dựng chuỗi sự kiện theo block
+(khớp 100% với đáp án Loghub).
+Ghi chú tìm hiểu tuần 1 (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
 
 Pipeline dự kiến:
 
@@ -19,15 +20,23 @@ flowchart LR
 ```
 project-3/
 ├── configs/
-│   ├── config.yaml          # toàn bộ đường dẫn (đọc qua src/config.py)
-│   └── drain3_basic.ini     # Drain3 cơ bản: chỉ che mã block, IP, con số
-├── data/raw/HDFS_2k/        # bộ mẫu 2.000 dòng (tự tải về, không đưa lên GitHub)
+│   ├── config.yaml          # toàn bộ đường dẫn + tham số (đọc qua src/config.py)
+│   ├── drain3_basic.ini     # TUẦN 1: Drain3 cơ bản, chỉ che mã block, IP, con số
+│   └── drain3.ini           # TUẦN 2: Drain3 đã chỉnh cho HDFS_v1 (29 template)
+├── data/                    # không đưa lên GitHub
+│   ├── raw/                 # HDFS_2k/, HDFS_v1/ (tự tải về, xem mục 3)
+│   ├── interim/             # kết quả bước 1: log có cấu trúc, bảng template, block_stats.csv
+│   └── processed/           # kết quả bước 2: sessions.pkl, event_index.json
 ├── documents/
 │   └── TUAN1_TIM_HIEU.md    # TUẦN 1: ghi chú tìm hiểu tài liệu và bộ dữ liệu
 ├── src/
 │   ├── config.py            # đọc config.yaml
-│   ├── utils.py             # logger, JSON
-│   └── explore_hdfs_2k.py   # TUẦN 1: khảo sát HDFS_2k bằng Drain3
+│   ├── utils.py             # logger, tạo thư mục, JSON
+│   ├── explore_hdfs_2k.py   # TUẦN 1: khảo sát HDFS_2k bằng Drain3
+│   ├── parse_logs.py        # BƯỚC 1: parse log thô bằng Drain3
+│   ├── build_sequences.py   # BƯỚC 2: gom sự kiện thành chuỗi theo block, gắn nhãn
+│   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
+│   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
 │   ├── figures/             # hình
 │   └── results/             # file JSON/CSV kết quả
@@ -44,7 +53,9 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 3. Tải bộ mẫu HDFS_2k (từ GitHub `logpai/loghub`)
+## 3. Tải dữ liệu
+
+**Bộ mẫu HDFS_2k** (khảo sát tuần 1, từ GitHub `logpai/loghub`):
 
 ```bash
 mkdir -p data/raw/HDFS_2k && cd data/raw/HDFS_2k
@@ -54,28 +65,49 @@ done
 cd ../../..
 ```
 
-## 4. Chạy khảo sát
+**Bộ đầy đủ HDFS_v1:** vào GitHub `logpai/loghub`, mục **HDFS**, theo link Zenodo để tải `HDFS_v1.zip`,
+rồi giải nén vào `data/raw/HDFS_v1/`:
 
 ```bash
-python -m src.explore_hdfs_2k
+mkdir -p data/raw/HDFS_v1
+unzip HDFS_v1.zip -d data/raw/HDFS_v1
+ls -lh data/raw/HDFS_v1 data/raw/HDFS_v1/preprocessed
 ```
+
+Cần có `HDFS.log` (~1,5GB, 11.175.629 dòng) và trong `preprocessed/`: `anomaly_label.csv` (nhãn của từng block),
+`HDFS.log_templates.csv`, `Event_traces.csv`. Hai file sau là kết quả parse của Loghub, chỉ dùng để kiểm tra.
+
+## 4. Chạy
 
 Luôn chạy bằng `python -m src.<tên_module>` từ thư mục `~/project-3`, vì các file import nhau theo dạng `from src.xxx import ...`.
 
-Kết quả:
-- `outputs/results/hdfs2k_survey.json`: số dòng (kể cả số dòng không khớp regex), số dòng theo level, theo component, số template, số mã block
-- `outputs/results/hdfs2k_templates.csv`: từng template Drain3, số dòng, EventId tương ứng của Loghub
-- `outputs/figures/hdfs2k_template_freq.png`: tần suất các template
+```bash
+python -m src.explore_hdfs_2k   # TUẦN 1: khảo sát bộ mẫu
+python -m src.parse_logs        # BƯỚC 1: parse HDFS.log bằng Drain3
+python -m src.build_sequences   # BƯỚC 2: chuỗi sự kiện theo block
+python -m src.block_stats       # ~10 giây, cần cho validate_parsing
+python -m src.validate_parsing  # so kết quả bước 1–2 với đáp án Loghub
+```
 
-Kết quả đúng phải là:
-- 2.000 dòng, không dòng nào lệch định dạng (`unmatched_lines` = 0): 1.920 INFO, 80 WARN
-  (cả 80 dòng WARN đều là "Got exception while serving block"), 6 component
-- Drain3 tìm được 16 template, đáp án Loghub có 14. Template E4 của Loghub ("BLOCK* ask ... to delete ...")
-  bị tách thành 3 template vì số mã block trong dòng log khác nhau. Cần xử lý trước khi parse dữ liệu đầy đủ.
-- 2.200 mã block khác nhau, 2.194 mã chỉ xuất hiện trong đúng 1 dòng. Bộ mẫu được lấy ngẫu nhiên theo dòng,
-  nên không dựng được chuỗi theo block. Việc train và đánh giá phải dùng HDFS_v1 đầy đủ.
+**Chạy thử nhanh:** trong `configs/config.yaml`, đặt `parse.max_lines: 200000` để chỉ parse 200 nghìn dòng đầu.
+Khi mọi bước chạy thông suốt, đổi lại `max_lines: null` để chạy toàn bộ dữ liệu.
 
-## 5. Kế hoạch
+## 5. Kết quả đúng phải là
+
+**Khảo sát HDFS_2k (tuần 1)** — `outputs/results/hdfs2k_survey.json`, `hdfs2k_templates.csv`, `outputs/figures/hdfs2k_template_freq.png`:
+- 2.000 dòng, không dòng nào lệch định dạng: 1.920 INFO, 80 WARN, 6 component.
+- Drain3 cơ bản tìm được 16 template, đáp án Loghub có 14 (template "BLOCK* ask ... to delete ..." bị tách theo số mã block).
+- 2.194 trên 2.200 mã block chỉ có 1 dòng, nên bộ mẫu không dựng được chuỗi theo block.
+
+**Parse HDFS_v1 (bước 1–2)** — `outputs/results/parsing_validation.json`, `drain_vs_reference.csv`:
+- 11.175.629 dòng, 29 template (khớp 29 template của Loghub), `grouping_accuracy = 1.0`.
+- 575.061 block (16.838 bất thường), chuỗi sự kiện khớp chính xác `Event_traces.csv` ở cả 575.061 block (`match_rate = 1.0`).
+- Vì kết quả parse khớp hoàn toàn, không cần phương án dự phòng (dùng chuỗi đã tiền xử lý của Loghub) ở mục 8 báo cáo tuần 1.
+- Nếu `parse_logs` cho kết quả khác thì lỗi nằm ở code parse, không phải ở cấu hình Drain3.
+- So với `drain3_basic.ini` (45 template, grouping accuracy 0,85), `drain3.ini` che thêm exception, đường dẫn file,
+  danh sách IP và tăng `sim_th` lên 0,9 (giải thích trong file).
+
+## 6. Kế hoạch
 
 | Tuần | Công việc |
 |---|---|

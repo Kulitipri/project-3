@@ -1,11 +1,29 @@
 # =============================================================
 # Cấu hình chung cho project DeepLog trên HDFS
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
-# Tuần 1: mới có phần khảo sát bộ mẫu HDFS_2k
+# Tuần 2: parse HDFS_v1 đầy đủ, dựng chuỗi theo block
 # =============================================================
 paths:
+  raw_log: data/raw/HDFS_v1/HDFS.log
+  label_file: data/raw/HDFS_v1/preprocessed/anomaly_label.csv
+  ref_templates: data/raw/HDFS_v1/preprocessed/HDFS.log_templates.csv   # 29 template chuẩn của Loghub
+  ref_traces: data/raw/HDFS_v1/preprocessed/Event_traces.csv            # chuỗi sự kiện chuẩn theo block
   sample_log: data/raw/HDFS_2k/HDFS_2k.log                              # bộ mẫu 2.000 dòng (khảo sát tuần 1)
   sample_ref_structured: data/raw/HDFS_2k/HDFS_2k.log_structured.csv    # đáp án parse của Loghub cho bộ mẫu
   sample_drain_config: configs/drain3_basic.ini                         # Drain3 cơ bản: chỉ che BLK/IP/NUM
+  drain_config: configs/drain3.ini
+  block_stats: data/interim/block_stats.csv
+  structured_log: data/interim/HDFS.log_structured.csv
+  templates: data/interim/HDFS.log_templates.csv
+  sessions: data/processed/sessions.pkl
+  event_index: data/processed/event_index.json
   results_dir: outputs/results
   figures_dir: outputs/figures
+
+parse:
+  log_format: "<Date> <Time> <Pid> <Level> <Component>: <Content>"
+  max_lines: null            # đặt 200000 để chạy thử nhanh; null = parse toàn bộ ~11 triệu dòng
+
+validate:
+  deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu
+  deeplog_train_normal_sessions: 4855  # số session Normal bài báo báo cáo cho phần train đó
