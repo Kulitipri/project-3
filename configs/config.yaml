@@ -1,7 +1,11 @@
 # =============================================================
 # Cấu hình chung cho project DeepLog trên HDFS
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
+# Tuần 1: mới có phần khảo sát bộ mẫu HDFS_2k
 # =============================================================
 paths:
+  sample_log: data/raw/HDFS_2k/HDFS_2k.log                              # bộ mẫu 2.000 dòng (khảo sát tuần 1)
+  sample_ref_structured: data/raw/HDFS_2k/HDFS_2k.log_structured.csv    # đáp án parse của Loghub cho bộ mẫu
+  sample_drain_config: configs/drain3_basic.ini                         # Drain3 cơ bản: chỉ che BLK/IP/NUM
   results_dir: outputs/results
   figures_dir: outputs/figures
