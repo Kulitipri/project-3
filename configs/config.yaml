@@ -1,8 +1,10 @@
 # =============================================================
 # Cấu hình chung cho project DeepLog trên HDFS
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
-# Tuần 2: parse HDFS_v1 đầy đủ, dựng chuỗi theo block
+# Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu
 # =============================================================
+seed: 42
+
 paths:
   raw_log: data/raw/HDFS_v1/HDFS.log
   label_file: data/raw/HDFS_v1/preprocessed/anomaly_label.csv
@@ -17,12 +19,21 @@ paths:
   templates: data/interim/HDFS.log_templates.csv
   sessions: data/processed/sessions.pkl
   event_index: data/processed/event_index.json
+  splits_dir: data/processed/splits
   results_dir: outputs/results
   figures_dir: outputs/figures
 
 parse:
   log_format: "<Date> <Time> <Pid> <Level> <Component>: <Content>"
   max_lines: null            # đặt 200000 để chạy thử nhanh; null = parse toàn bộ ~11 triệu dòng
+
+split:
+  strategy: chronological    # chronological | random
+  train_normal_ratio: 0.01   # tỉ lệ session normal dùng để train (bài báo DeepLog dùng ~1%)
+  val_ratio: 0.1             # tỉ lệ trích từ phần train để làm validation
+
+model:
+  window_size: 10            # h trong bài báo: số sự kiện nhìn lại (notebook EDA dùng; model cài ở tuần 3)
 
 validate:
   deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu

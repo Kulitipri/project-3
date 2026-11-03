@@ -3,8 +3,8 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 2** — parse toàn bộ HDFS_v1 bằng Drain3 và dựng chuỗi sự kiện theo block
-(khớp 100% với đáp án Loghub).
+**Trạng thái: tuần 2** — parse toàn bộ HDFS_v1 bằng Drain3 (khớp 100% với đáp án Loghub), dựng chuỗi sự kiện
+theo block, khám phá dữ liệu (EDA) và chia dữ liệu theo thời gian.
 Ghi chú tìm hiểu tuần 1 (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
 
 Pipeline dự kiến:
@@ -26,15 +26,18 @@ project-3/
 ├── data/                    # không đưa lên GitHub
 │   ├── raw/                 # HDFS_2k/, HDFS_v1/ (tự tải về, xem mục 3)
 │   ├── interim/             # kết quả bước 1: log có cấu trúc, bảng template, block_stats.csv
-│   └── processed/           # kết quả bước 2: sessions.pkl, event_index.json
+│   └── processed/           # kết quả bước 2–3: sessions.pkl, event_index.json, splits/
 ├── documents/
 │   └── TUAN1_TIM_HIEU.md    # TUẦN 1: ghi chú tìm hiểu tài liệu và bộ dữ liệu
+├── notebooks/
+│   └── 01_eda_hdfs.ipynb    # TUẦN 2: khám phá dữ liệu (EDA)
 ├── src/
 │   ├── config.py            # đọc config.yaml
 │   ├── utils.py             # logger, tạo thư mục, JSON
 │   ├── explore_hdfs_2k.py   # TUẦN 1: khảo sát HDFS_2k bằng Drain3
 │   ├── parse_logs.py        # BƯỚC 1: parse log thô bằng Drain3
 │   ├── build_sequences.py   # BƯỚC 2: gom sự kiện thành chuỗi theo block, gắn nhãn
+│   ├── split_data.py        # BƯỚC 3: chia train / val / test
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
@@ -85,8 +88,10 @@ Luôn chạy bằng `python -m src.<tên_module>` từ thư mục `~/project-3`,
 python -m src.explore_hdfs_2k   # TUẦN 1: khảo sát bộ mẫu
 python -m src.parse_logs        # BƯỚC 1: parse HDFS.log bằng Drain3
 python -m src.build_sequences   # BƯỚC 2: chuỗi sự kiện theo block
-python -m src.block_stats       # ~10 giây, cần cho validate_parsing
+python -m src.block_stats       # ~10 giây, cần cho validate_parsing và notebook EDA
 python -m src.validate_parsing  # so kết quả bước 1–2 với đáp án Loghub
+python -m src.split_data        # BƯỚC 3: chia train / val / test
+jupyter notebook notebooks/01_eda_hdfs.ipynb
 ```
 
 **Chạy thử nhanh:** trong `configs/config.yaml`, đặt `parse.max_lines: 200000` để chỉ parse 200 nghìn dòng đầu.
@@ -106,6 +111,14 @@ Khi mọi bước chạy thông suốt, đổi lại `max_lines: null` để ch�
 - Nếu `parse_logs` cho kết quả khác thì lỗi nằm ở code parse, không phải ở cấu hình Drain3.
 - So với `drain3_basic.ini` (45 template, grouping accuracy 0,85), `drain3.ini` che thêm exception, đường dẫn file,
   danh sách IP và tăng `sim_th` lên 0,9 (giải thích trong file).
+
+**Chia dữ liệu (bước 3)** — `data/processed/splits/summary.json`:
+- train 5.024 + val 558 session, toàn bộ là Normal: 1% session Normal *sớm nhất*, thực tế chỉ là 9 phút log đầu
+  (20:35 → 20:45 ngày 09/11/2008).
+- test 569.276 session (16.635 bất thường), kéo dài khoảng 38,5 giờ. 203 session bất thường bắt đầu trước mốc cắt bị bỏ,
+  để test chỉ chứa "tương lai".
+- Notebook EDA giải thích vì sao chọn cách chia này và các đặc điểm của dữ liệu (độ dài session, bất thường theo thời gian,
+  sự kiện chỉ có ở session bất thường, chuỗi trùng lặp). Hình lưu ở `outputs/figures/eda_*.png`.
 
 ## 6. Kế hoạch
 

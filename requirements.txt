@@ -1,5 +1,8 @@
+numpy
 pandas
+scikit-learn
 drain3==0.9.11
 pyyaml
 tqdm
 matplotlib
+jupyter
