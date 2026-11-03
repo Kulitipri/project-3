@@ -1,7 +1,7 @@
 # =============================================================
 # Cấu hình chung cho project DeepLog trên HDFS
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
-# Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu
+# Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu, baseline
 # =============================================================
 seed: 42
 
@@ -34,6 +34,13 @@ split:
 
 model:
   window_size: 10            # h trong bài báo: số sự kiện nhìn lại (notebook EDA dùng; model cài ở tuần 3)
+
+baseline:                    # bước 6: cấu hình MẶC ĐỊNH, không chỉnh theo nhãn (chọn tham số ở bước 7, tuần 3)
+  unlabeled_ratio: 0.1       # 10% session SỚM NHẤT của test, bỏ nhãn → dữ liệu fit kiểu unsupervised; chấm trên 90% còn lại
+  normal_threshold_percentile: 99   # fit trên session Normal: ngưỡng chấp nhận ~1% báo nhầm trên dữ liệu fit
+  contamination: 0.03        # fit trên dữ liệu không nhãn: giả định ~3% là bất thường → ngưỡng = phân vị 97
+  pca_n_components: 0.95     # giữ số thành phần giải thích 95% phương sai
+  iforest_n_estimators: 100
 
 validate:
   deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu
