@@ -50,12 +50,23 @@ train:
 detect:
   top_g: 9                   # g trong bài báo: sự kiện thật phải nằm trong top-g dự đoán
 
-baseline:                    # bước 6: cấu hình MẶC ĐỊNH, không chỉnh theo nhãn (chọn tham số ở bước 7, tuần 3)
+baseline:                    # bước 6: cấu hình MẶC ĐỊNH, không chỉnh theo nhãn (chỉnh ở bước 7, mục select)
   unlabeled_ratio: 0.1       # 10% session SỚM NHẤT của test, bỏ nhãn → dữ liệu fit kiểu unsupervised; chấm trên 90% còn lại
   normal_threshold_percentile: 99   # fit trên session Normal: ngưỡng chấp nhận ~1% báo nhầm trên dữ liệu fit
   contamination: 0.03        # fit trên dữ liệu không nhãn: giả định ~3% là bất thường → ngưỡng = phân vị 97
   pca_n_components: 0.95     # giữ số thành phần giải thích 95% phương sai
   iforest_n_estimators: 100
+
+select:                      # bước 7: chọn phương án + ngưỡng của MỌI phương pháp theo cùng một cách
+  tune_ratio: 0.1            # 10% session của test (có nhãn) dùng để chọn phương án; báo cáo trên 90% còn lại
+  tune_mode: random          # earliest = 10% sớm nhất | random = 10% ngẫu nhiên trong test
+  tune_seed: 42              # seed chọn 10% ngẫu nhiên (tune_mode random), tách khỏi seed của mô hình
+  pca_features: [standard, raw, tfidf, presence, log1p]
+  pca_n_components: [0.9, 0.95, 0.99]
+  iforest_features: [raw, presence, log1p]
+  iforest_n_estimators: [100, 300]
+  fit_on: [train_normal, unlabeled_tune]   # unlabeled_tune: fit PCA/IForest trên tập tune KHÔNG dùng nhãn
+  # ngưỡng của mọi phương pháp (kể cả g của DeepLog) = ngưỡng cho F1 cao nhất trên tập tune
 
 validate:
   deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu

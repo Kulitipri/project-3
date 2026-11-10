@@ -13,7 +13,7 @@ Mỗi phương pháp được fit theo 2 cách:
                  Ngưỡng = phân vị 100 × (1 - contamination), tức giả định ~contamination session là bất thường.
 Cả 4 tổ hợp được chấm trên CÙNG tập eval = phần test còn lại, nên so sánh được với nhau.
 Ngoài P/R/F1 ở ngưỡng mặc định còn có ROC-AUC và AP (không phụ thuộc ngưỡng, xem evaluate.score_metrics).
-Đặc trưng / ngưỡng tốt nhất sẽ được chọn ở bước 7 (tuần 3) trên tập có nhãn, không chỉnh ở đây.
+Đặc trưng / ngưỡng tốt nhất được chọn ở bước 7 (model_selection.py), không chỉnh ở đây.
 
 Vì sao cần cả 2 cách fit:
   Cây của Isolation Forest chỉ cắt trên cột có biến thiên trong dữ liệu fit. Session Normal của train
@@ -115,6 +115,7 @@ def split_unlabeled(test: pd.DataFrame, ratio: float) -> tuple[pd.DataFrame, pd.
     Tách test thành (phần không nhãn, phần eval) theo thời gian.
 
     Phần không nhãn = ratio session có StartTime SỚM NHẤT; chỉ dùng EventSequence, KHÔNG dùng Label.
+    Trùng với tập tune của model_selection.py khi tune_mode = "earliest" và tune_ratio = ratio.
     """
     test = test.sort_values("StartTime", kind="stable").reset_index(drop=True)
     n_unlabeled = round(len(test) * ratio)

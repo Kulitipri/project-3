@@ -3,9 +3,10 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 3 (đang làm)** — đã cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g,
-phân tích lỗi. Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA,
-chia dữ liệu theo thời gian, baseline PCA / Isolation Forest.
+**Trạng thái: tuần 3** — cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g, chọn ngưỡng
+của mọi phương pháp (g của DeepLog, PCA, Isolation Forest) theo cùng một cách trên tập tune, phân tích lỗi.
+Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA, chia dữ liệu theo thời gian,
+baseline PCA / Isolation Forest.
 Ghi chú tìm hiểu tuần 1 (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
 
 Pipeline:
@@ -43,7 +44,9 @@ project-3/
 │   ├── model.py             # TUẦN 3: mô hình DeepLog (Embedding → LSTM 2 lớp → Linear)
 │   ├── train.py             # BƯỚC 4: train DeepLog, early stopping theo val loss
 │   ├── detect.py            # BƯỚC 5: phát hiện bằng luật top-g
-│   ├── baselines.py         # BƯỚC 6: PCA, Isolation Forest
+│   ├── baselines.py         # BƯỚC 6: PCA, Isolation Forest (ngưỡng mặc định)
+│   ├── deeplog_scores.py    # BƯỚC 7a: rank của sự kiện thật ở mọi vị trí → kết quả của mọi g
+│   ├── model_selection.py   # BƯỚC 7b: chọn phương án + ngưỡng trên tập tune, báo cáo trên tập eval
 │   ├── evaluate.py          # precision / recall / F1, ROC-AUC, AP, recall theo nhóm, phân tích lỗi
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
@@ -51,6 +54,7 @@ project-3/
 │   ├── figures/             # hình
 │   ├── models/              # checkpoint DeepLog (.pt), không đưa lên GitHub
 │   └── results/             # file JSON/CSV kết quả
+├── scripts/run_pipeline.sh  # chạy bước 1–7 + phân tích lỗi
 ├── requirements.txt
 └── README.md
 ```
@@ -108,7 +112,11 @@ python -m src.detect            # BƯỚC 5: top-g với g = detect.top_g (thử
 python -m src.detect --top-g 7  # g khác, ghi ra deeplog_metrics_g7.json, deeplog_predictions_g7.pkl
 python -m src.evaluate --top-g 7  # phân tích lỗi + recall theo 2 nhóm bất thường
 python -m src.baselines         # BƯỚC 6: PCA và Isolation Forest
+python -m src.deeplog_scores    # BƯỚC 7a: rank DeepLog → kết quả của mọi g, không chạy lại model
+python -m src.model_selection --tune-mode earliest   # BƯỚC 7b (chạy cả --tune-mode random)
 ```
+
+Hoặc chạy bước 1–7 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
 
 **Chạy thử nhanh:** trong `configs/config.yaml`, đặt `parse.max_lines: 200000` để chỉ parse 200 nghìn dòng đầu.
 Khi mọi bước chạy thông suốt, đổi lại `max_lines: null` để chạy toàn bộ dữ liệu.
@@ -174,12 +182,34 @@ train + val (cùng dữ liệu DeepLog sẽ dùng), hoặc trên 10% session s�
   đầu, phần mà cách cắt cửa sổ của DeepLog không bao giờ dự đoán. 1.778/6.465 FP là session Normal có nhân bản lại block
   (E6–E9; chỉ 1/5.582 session train có); trong số còn lại, 3.781 FP bị đọc (E10) từ 4 lần trở lên, trong khi trung vị ở train là 1.
 
+**Chọn phương án công bằng (bước 7)** — `outputs/results/model_selection_{earliest,random}.json`.
+Test chia làm tập tune (10%, có nhãn, chỉ để chọn phương án và ngưỡng) và tập eval (90%, 512.348 session, chỉ để báo cáo).
+Ngưỡng của MỌI phương pháp là ngưỡng cho F1 cao nhất trên tune; điểm của DeepLog là rank lớn nhất của sự kiện thật
+trong session, nên "max rank > g" chính là luật top-g. F1 trên eval (seed 42):
+
+| Phương pháp | Fit trên | Tune ngẫu nhiên | Tune sớm nhất |
+|---|---|---|---|
+| DeepLog (g chọn được = 7 ở cả hai) | 5.582 session Normal | 0,834 | 0,811 |
+| PCA | 5.582 session Normal | 0,848 | 0,172 |
+| PCA | tập tune, không dùng nhãn | 0,973* | 0,213 |
+| Isolation Forest | 5.582 session Normal | 0,258 | 0,254 |
+| Isolation Forest | tập tune, không dùng nhãn | 0,713 | 0,829 |
+
+\* Tập tune ngẫu nhiên rải khắp thời gian test, nên phương án này đã thấy log (không nhãn) của tương lai: chỉ là cận trên.
+
+- Cùng dữ liệu fit và tune ngẫu nhiên: DeepLog ≈ PCA. Tune trên 3,5 giờ đầu: ngưỡng PCA không dùng được về sau
+  (báo nhầm hơn 100 nghìn session), còn g = 7 của DeepLog vẫn dùng được.
+- DeepLog có ROC-AUC 0,996 trên eval, cao nhất trong các phương án hợp lệ về thời gian.
+- Recall theo 2 nhóm bất thường của EDA (`recall_structural` / `recall_sequence`): DeepLog 0,988 / 0,996;
+  PCA fit trên Normal 0,569 / 0,996 (bỏ sót toàn bộ 2.601 session chỉ có `E2 E1` hoặc `E1 E2`).
+- Đây là kết quả của một lần train (seed 42). Độ dao động theo seed sẽ được đo ở tuần 4.
+
 ## 6. Kế hoạch
 
 | Tuần | Công việc |
 |---|---|
 | 1 | Tìm hiểu DeepLog, HDFS_v1; khảo sát HDFS_2k bằng Drain3 |
 | 2 | Tải HDFS_v1, parse bằng Drain3, dựng chuỗi theo block, chia dữ liệu theo thời gian, phương pháp cổ điển |
-| 3 | Cài đặt và train DeepLog, tinh chỉnh g và h, phân tích lỗi |
-| 4 | Script phát hiện; nếu kịp, thử trên AIT Log Data Set V2.0 |
+| 3 | Cài đặt và train DeepLog, chọn g và ngưỡng của mọi phương pháp trên tập tune, phân tích lỗi (đã xong) |
+| 4 | Độ ổn định theo seed; xử lý các điểm mù của DeepLog tìm được ở phân tích lỗi; đánh giá theo số cảnh báo giả mỗi giờ, độ trễ phát hiện, drift; đối chứng chia random |
 | 5 | Báo cáo cuối kỳ, slide, demo |
