@@ -47,6 +47,9 @@ train:
   patience: 5                # early stopping: dừng nếu val loss không giảm sau N epoch
   device: auto               # auto | mps | cpu
 
+detect:
+  top_g: 9                   # g trong bài báo: sự kiện thật phải nằm trong top-g dự đoán
+
 baseline:                    # bước 6: cấu hình MẶC ĐỊNH, không chỉnh theo nhãn (chọn tham số ở bước 7, tuần 3)
   unlabeled_ratio: 0.1       # 10% session SỚM NHẤT của test, bỏ nhãn → dữ liệu fit kiểu unsupervised; chấm trên 90% còn lại
   normal_threshold_percentile: 99   # fit trên session Normal: ngưỡng chấp nhận ~1% báo nhầm trên dữ liệu fit

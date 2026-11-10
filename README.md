@@ -3,9 +3,9 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 3 (đang làm)** — đã cài mô hình DeepLog bằng PyTorch và huấn luyện trên 5.024 session Normal.
-Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA, chia dữ liệu theo thời gian,
-baseline PCA / Isolation Forest.
+**Trạng thái: tuần 3 (đang làm)** — đã cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g,
+phân tích lỗi. Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA,
+chia dữ liệu theo thời gian, baseline PCA / Isolation Forest.
 Ghi chú tìm hiểu tuần 1 (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
 
 Pipeline:
@@ -42,8 +42,9 @@ project-3/
 │   ├── dataset.py           # TUẦN 3: cửa sổ trượt h sự kiện + Dataset PyTorch (pad session ngắn)
 │   ├── model.py             # TUẦN 3: mô hình DeepLog (Embedding → LSTM 2 lớp → Linear)
 │   ├── train.py             # BƯỚC 4: train DeepLog, early stopping theo val loss
+│   ├── detect.py            # BƯỚC 5: phát hiện bằng luật top-g
 │   ├── baselines.py         # BƯỚC 6: PCA, Isolation Forest
-│   ├── evaluate.py          # precision / recall / F1, ROC-AUC, AP
+│   ├── evaluate.py          # precision / recall / F1, ROC-AUC, AP, recall theo nhóm, phân tích lỗi
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
@@ -103,6 +104,9 @@ python -m src.validate_parsing  # so kết quả bước 1–2 với đáp án L
 python -m src.split_data        # BƯỚC 3: chia train / val / test
 jupyter notebook notebooks/01_eda_hdfs.ipynb
 python -m src.train             # BƯỚC 4: train DeepLog (~15 giây trên Mac M-series)
+python -m src.detect            # BƯỚC 5: top-g với g = detect.top_g (thử nhanh: --max-sessions 20000)
+python -m src.detect --top-g 7  # g khác, ghi ra deeplog_metrics_g7.json, deeplog_predictions_g7.pkl
+python -m src.evaluate --top-g 7  # phân tích lỗi + recall theo 2 nhóm bất thường
 python -m src.baselines         # BƯỚC 6: PCA và Isolation Forest
 ```
 
@@ -153,6 +157,22 @@ train + val (cùng dữ liệu DeepLog sẽ dùng), hoặc trên 10% session s�
   61.278 tham số. Session có ≤ h sự kiện được thêm PAD vào đầu nên vẫn có 1 cửa sổ (notebook EDA, Phần 2).
 - 80.619 cặp (cửa sổ, sự kiện kế tiếp) từ 5.024 session train, 8.329 cặp từ 558 session val.
 - Adam, lr = 0,001, batch 2.048, seed 42. Early stopping dừng ở epoch 26; val loss thấp nhất 0,210 ở epoch 21.
+
+**Phát hiện top-g (bước 5)** — `outputs/results/deeplog_metrics_g{g}.json` (toàn bộ test, 569.276 session):
+
+| g | Precision | Recall | F1 | FP | FN |
+|---|---|---|---|---|---|
+| 5 | 0,385 | 0,999 | 0,556 | 26.545 | 22 |
+| 7 | 0,719 | 0,992 | 0,834 | 6.465 | 125 |
+| 9 (bài báo) | 0,762 | 0,869 | 0,812 | 4.508 | 2.180 |
+| 11 | 0,803 | 0,785 | 0,794 | 3.212 | 3.572 |
+| 15 | 0,836 | 0,636 | 0,723 | 2.071 | 6.050 |
+
+- Bảng chỉ để xem độ nhạy theo g; g dùng để báo cáo được chọn trên tập tune ở bước 7 (không chọn theo F1 trên test).
+- Phân tích lỗi ở g = 7 (`python -m src.evaluate --top-g 7` → `error_analysis_g7.csv`):
+  114/125 FN chứa sự kiện chưa từng có trong train (chủ yếu E15 "Receiving empty packet") nhưng chỉ nằm trong 10 sự kiện
+  đầu, phần mà cách cắt cửa sổ của DeepLog không bao giờ dự đoán. 1.778/6.465 FP là session Normal có nhân bản lại block
+  (E6–E9; chỉ 1/5.582 session train có); trong số còn lại, 3.781 FP bị đọc (E10) từ 4 lần trở lên, trong khi trung vị ở train là 1.
 
 ## 6. Kế hoạch
 
