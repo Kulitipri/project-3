@@ -3,11 +3,12 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 2** — parse toàn bộ HDFS_v1 bằng Drain3 (khớp 100% với đáp án Loghub), dựng chuỗi sự kiện
-theo block, khám phá dữ liệu (EDA), chia dữ liệu theo thời gian và chạy baseline PCA / Isolation Forest.
+**Trạng thái: tuần 3 (đang làm)** — đã cài mô hình DeepLog bằng PyTorch và huấn luyện trên 5.024 session Normal.
+Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA, chia dữ liệu theo thời gian,
+baseline PCA / Isolation Forest.
 Ghi chú tìm hiểu tuần 1 (bài toán, DeepLog, HDFS_v1, phạm vi, các quyết định): [documents/TUAN1_TIM_HIEU.md](documents/TUAN1_TIM_HIEU.md).
 
-Pipeline dự kiến:
+Pipeline:
 
 ```mermaid
 flowchart LR
@@ -33,23 +34,25 @@ project-3/
 │   └── 01_eda_hdfs.ipynb    # TUẦN 2: khám phá dữ liệu (EDA)
 ├── src/
 │   ├── config.py            # đọc config.yaml
-│   ├── utils.py             # logger, tạo thư mục, JSON
+│   ├── utils.py             # seed, chọn device (MPS/CUDA/CPU), logger, JSON
 │   ├── explore_hdfs_2k.py   # TUẦN 1: khảo sát HDFS_2k bằng Drain3
 │   ├── parse_logs.py        # BƯỚC 1: parse log thô bằng Drain3
 │   ├── build_sequences.py   # BƯỚC 2: gom sự kiện thành chuỗi theo block, gắn nhãn
 │   ├── split_data.py        # BƯỚC 3: chia train / val / test
+│   ├── dataset.py           # TUẦN 3: cửa sổ trượt h sự kiện + Dataset PyTorch (pad session ngắn)
+│   ├── model.py             # TUẦN 3: mô hình DeepLog (Embedding → LSTM 2 lớp → Linear)
+│   ├── train.py             # BƯỚC 4: train DeepLog, early stopping theo val loss
 │   ├── baselines.py         # BƯỚC 6: PCA, Isolation Forest
 │   ├── evaluate.py          # precision / recall / F1, ROC-AUC, AP
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
 │   ├── figures/             # hình
+│   ├── models/              # checkpoint DeepLog (.pt), không đưa lên GitHub
 │   └── results/             # file JSON/CSV kết quả
 ├── requirements.txt
 └── README.md
 ```
-
-Bước 4–5 (train DeepLog, phát hiện bằng luật top-g) làm ở tuần 3.
 
 ## 2. Cài đặt
 
@@ -58,7 +61,10 @@ cd ~/project-3
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+python -c "import torch; print(torch.__version__, 'MPS:', torch.backends.mps.is_available())"
 ```
+
+Dòng cuối in `MPS: True` nghĩa là PyTorch dùng được GPU của Mac; nếu không, `train.device: auto` tự lùi về CUDA hoặc CPU.
 
 ## 3. Tải dữ liệu
 
@@ -96,6 +102,7 @@ python -m src.block_stats       # ~10 giây, cần cho validate_parsing và note
 python -m src.validate_parsing  # so kết quả bước 1–2 với đáp án Loghub
 python -m src.split_data        # BƯỚC 3: chia train / val / test
 jupyter notebook notebooks/01_eda_hdfs.ipynb
+python -m src.train             # BƯỚC 4: train DeepLog (~15 giây trên Mac M-series)
 python -m src.baselines         # BƯỚC 6: PCA và Isolation Forest
 ```
 
@@ -140,6 +147,12 @@ train + val (cùng dữ liệu DeepLog sẽ dùng), hoặc trên 10% session s�
 - Isolation Forest fit trên session Normal gần như đoán mò: cây chỉ cắt được trên 12/29 loại sự kiện có thay đổi trong
   train, trong khi 60% session bất thường chứa sự kiện chưa từng xuất hiện trong train (mục `diagnostics`).
 - PCA thì ngược lại: TF-IDF cho sự kiện chưa từng thấy trọng số rất lớn, nên fit trên session Normal cho kết quả tốt nhất.
+
+**Train DeepLog (bước 4)** — `outputs/models/deeplog_best.pt`, `outputs/results/train_history.json`:
+- Mô hình theo bài báo: cửa sổ h = 10, Embedding 32 chiều → LSTM 2 lớp × 64 đơn vị → Linear 30 lớp (29 sự kiện + PAD),
+  61.278 tham số. Session có ≤ h sự kiện được thêm PAD vào đầu nên vẫn có 1 cửa sổ (notebook EDA, Phần 2).
+- 80.619 cặp (cửa sổ, sự kiện kế tiếp) từ 5.024 session train, 8.329 cặp từ 558 session val.
+- Adam, lr = 0,001, batch 2.048, seed 42. Early stopping dừng ở epoch 26; val loss thấp nhất 0,210 ở epoch 21.
 
 ## 6. Kế hoạch
 

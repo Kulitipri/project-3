@@ -2,6 +2,7 @@
 # Cấu hình chung cho project DeepLog trên HDFS
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
 # Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu, baseline
+# Tuần 3: DeepLog (LSTM), phát hiện top-g, chọn ngưỡng cho mọi phương pháp, phân tích lỗi
 # =============================================================
 seed: 42
 
@@ -20,6 +21,7 @@ paths:
   sessions: data/processed/sessions.pkl
   event_index: data/processed/event_index.json
   splits_dir: data/processed/splits
+  model_dir: outputs/models
   results_dir: outputs/results
   figures_dir: outputs/figures
 
@@ -33,7 +35,17 @@ split:
   val_ratio: 0.1             # tỉ lệ trích từ phần train để làm validation
 
 model:
-  window_size: 10            # h trong bài báo: số sự kiện nhìn lại (notebook EDA dùng; model cài ở tuần 3)
+  window_size: 10            # h trong bài báo: số sự kiện nhìn lại
+  embedding_dim: 32
+  hidden_size: 64            # bài báo: 64 đơn vị nhớ mỗi lớp
+  num_layers: 2              # bài báo: 2 lớp LSTM
+
+train:
+  batch_size: 2048
+  epochs: 50
+  lr: 0.001
+  patience: 5                # early stopping: dừng nếu val loss không giảm sau N epoch
+  device: auto               # auto | mps | cpu
 
 baseline:                    # bước 6: cấu hình MẶC ĐỊNH, không chỉnh theo nhãn (chọn tham số ở bước 7, tuần 3)
   unlabeled_ratio: 0.1       # 10% session SỚM NHẤT của test, bỏ nhãn → dữ liệu fit kiểu unsupervised; chấm trên 90% còn lại
