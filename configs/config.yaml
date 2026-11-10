@@ -41,7 +41,7 @@ model:
   num_layers: 2              # bài báo: 2 lớp LSTM
 
 train:
-  batch_size: 2048
+  batch_size: 512
   epochs: 50
   lr: 0.001
   patience: 5                # early stopping: dừng nếu val loss không giảm sau N epoch

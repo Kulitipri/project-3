@@ -164,23 +164,24 @@ train + val (cùng dữ liệu DeepLog sẽ dùng), hoặc trên 10% session s�
 - Mô hình theo bài báo: cửa sổ h = 10, Embedding 32 chiều → LSTM 2 lớp × 64 đơn vị → Linear 30 lớp (29 sự kiện + PAD),
   61.278 tham số. Session có ≤ h sự kiện được thêm PAD vào đầu nên vẫn có 1 cửa sổ (notebook EDA, Phần 2).
 - 80.619 cặp (cửa sổ, sự kiện kế tiếp) từ 5.024 session train, 8.329 cặp từ 558 session val.
-- Adam, lr = 0,001, batch 2.048, seed 42. Early stopping dừng ở epoch 26; val loss thấp nhất 0,210 ở epoch 21.
+- Adam, lr = 0,001, batch 512, seed 42. Early stopping dừng ở epoch 11; val loss thấp nhất 0,210 ở epoch 6.
 
 **Phát hiện top-g (bước 5)** — `outputs/results/deeplog_metrics_g{g}.json` (toàn bộ test, 569.276 session):
 
 | g | Precision | Recall | F1 | FP | FN |
 |---|---|---|---|---|---|
-| 5 | 0,385 | 0,999 | 0,556 | 26.545 | 22 |
-| 7 | 0,719 | 0,992 | 0,834 | 6.465 | 125 |
-| 9 (bài báo) | 0,762 | 0,869 | 0,812 | 4.508 | 2.180 |
-| 11 | 0,803 | 0,785 | 0,794 | 3.212 | 3.572 |
-| 15 | 0,836 | 0,636 | 0,723 | 2.071 | 6.050 |
+| 5 | 0,708 | 0,998 | 0,829 | 6.832 | 30 |
+| 7 | 0,847 | 0,993 | 0,914 | 2.985 | 122 |
+| 9 (bài báo) | 0,839 | 0,861 | 0,850 | 2.754 | 2.311 |
+| 11 | 0,838 | 0,747 | 0,790 | 2.400 | 4.208 |
+| 15 | 0,910 | 0,596 | 0,720 | 984 | 6.719 |
 
 - Bảng chỉ để xem độ nhạy theo g; g dùng để báo cáo được chọn trên tập tune ở bước 7 (không chọn theo F1 trên test).
 - Phân tích lỗi ở g = 7 (`python -m src.evaluate --top-g 7` → `error_analysis_g7.csv`):
-  114/125 FN chứa sự kiện chưa từng có trong train (chủ yếu E15 "Receiving empty packet") nhưng chỉ nằm trong 10 sự kiện
-  đầu, phần mà cách cắt cửa sổ của DeepLog không bao giờ dự đoán. 1.778/6.465 FP là session Normal có nhân bản lại block
-  (E6–E9; chỉ 1/5.582 session train có); trong số còn lại, 3.781 FP bị đọc (E10) từ 4 lần trở lên, trong khi trung vị ở train là 1.
+  119/122 FN chứa sự kiện chưa từng có trong train (chủ yếu E15 "Receiving empty packet") nhưng chỉ nằm trong 10 sự kiện
+  đầu, phần mà cách cắt cửa sổ của DeepLog không bao giờ dự đoán. 1.778/2.985 FP là session Normal có nhân bản lại block
+  (E6–E9; chỉ 1/5.582 session train có); trong số còn lại, 218 FP chứa sự kiện chưa từng thấy (chủ yếu E23) và 269 FP
+  bị đọc (E10) từ 4 lần trở lên, trong khi trung vị ở train là 1.
 
 **Chọn phương án công bằng (bước 7)** — `outputs/results/model_selection_{earliest,random}.json`.
 Test chia làm tập tune (10%, có nhãn, chỉ để chọn phương án và ngưỡng) và tập eval (90%, 512.348 session, chỉ để báo cáo).
@@ -189,7 +190,7 @@ trong session, nên "max rank > g" chính là luật top-g. F1 trên eval (seed 
 
 | Phương pháp | Fit trên | Tune ngẫu nhiên | Tune sớm nhất |
 |---|---|---|---|
-| DeepLog (g chọn được = 7 ở cả hai) | 5.582 session Normal | 0,834 | 0,811 |
+| DeepLog (g chọn được = 7 ở cả hai) | 5.582 session Normal | 0,915 | 0,903 |
 | PCA | 5.582 session Normal | 0,848 | 0,172 |
 | PCA | tập tune, không dùng nhãn | 0,973* | 0,213 |
 | Isolation Forest | 5.582 session Normal | 0,258 | 0,254 |
@@ -197,12 +198,14 @@ trong session, nên "max rank > g" chính là luật top-g. F1 trên eval (seed 
 
 \* Tập tune ngẫu nhiên rải khắp thời gian test, nên phương án này đã thấy log (không nhãn) của tương lai: chỉ là cận trên.
 
-- Cùng dữ liệu fit và tune ngẫu nhiên: DeepLog ≈ PCA. Tune trên 3,5 giờ đầu: ngưỡng PCA không dùng được về sau
-  (báo nhầm hơn 100 nghìn session), còn g = 7 của DeepLog vẫn dùng được.
-- DeepLog có ROC-AUC 0,996 trên eval, cao nhất trong các phương án hợp lệ về thời gian.
-- Recall theo 2 nhóm bất thường của EDA (`recall_structural` / `recall_sequence`): DeepLog 0,988 / 0,996;
+- Cùng dữ liệu fit và tune ngẫu nhiên (seed 42): DeepLog 0,915, PCA 0,848. Tune trên 3,5 giờ đầu: ngưỡng PCA không dùng
+  được về sau (báo nhầm hơn 100 nghìn session), còn g = 7 của DeepLog vẫn dùng được.
+- DeepLog có ROC-AUC 0,997 trên eval, cao nhất trong các phương án hợp lệ về thời gian.
+- Recall theo 2 nhóm bất thường của EDA (`recall_structural` / `recall_sequence`): DeepLog 0,988 / 0,997;
   PCA fit trên Normal 0,569 / 0,996 (bỏ sót toàn bộ 2.601 session chỉ có `E2 E1` hoặc `E1 E2`).
-- Đây là kết quả của một lần train (seed 42). Độ dao động theo seed sẽ được đo ở tuần 4.
+- Theo seed (đổi `seed` trong config, chạy lại bước 4 và 7; seed 42, 1, 2, 3, 4): F1 của DeepLog 0,846 ± 0,053 khi tune
+  ngẫu nhiên và 0,845 ± 0,048 khi tune sớm nhất (từ 0,79 đến 0,91). Khi tune sớm nhất, DeepLog giữ F1 ≥ 0,79 ở cả 5 seed,
+  còn PCA chỉ đạt 0,172. Tuần 4 sẽ giảm độ dao động này.
 
 ## 6. Kế hoạch
 
