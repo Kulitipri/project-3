@@ -1,7 +1,9 @@
-"""Các hàm tiện ích dùng chung: seed, chọn device, logger, đọc/ghi JSON."""
+"""Các hàm tiện ích dùng chung: seed, chọn device, logger, đọc/ghi JSON, nguồn gốc kết quả."""
 import json
 import logging
 import random
+import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -66,3 +68,35 @@ def load_json(path: str | Path):
     """Đọc file JSON."""
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _git(*args: str) -> str | None:
+    """Chạy 1 lệnh git ở thư mục gốc project; None nếu không có git / không phải repo."""
+    try:
+        out = subprocess.run(["git", *args], cwd=Path(__file__).resolve().parent.parent,
+                             capture_output=True, text=True, check=True)
+        return out.stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def run_metadata(cfg: dict) -> dict:
+    """
+    Nguồn gốc của một file kết quả: thời điểm chạy, commit git, file config và TOÀN BỘ config đã dùng.
+
+    git_dirty = True nghĩa là code/config đang khác commit (kể cả file chưa commit trong src/, configs/, scripts/),
+    tức commit một mình không đủ để tái lập kết quả. Ghi kèm vào mọi file kết quả để không còn tình trạng
+    số liệu của cấu hình cũ (vd batch_size khác) nằm lẫn với số liệu mới mà không ai biết.
+    """
+    project_root = Path(__file__).resolve().parent.parent
+    config = {key: value for key, value in cfg.items() if key not in ("paths", "config_file")}
+    config["paths"] = {key: str(Path(value).relative_to(project_root)) if Path(value).is_relative_to(project_root)
+                       else str(value) for key, value in cfg.get("paths", {}).items()}
+    status = _git("status", "--porcelain", "--", "src", "configs", "scripts")
+    return {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "git_commit": _git("rev-parse", "--short", "HEAD"),
+        "git_dirty": None if status is None else bool(status),
+        "config_file": cfg.get("config_file"),
+        "config": config,
+    }

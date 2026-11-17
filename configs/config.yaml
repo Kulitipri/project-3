@@ -3,6 +3,7 @@
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
 # Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu, baseline
 # Tuần 3: DeepLog (LSTM), phát hiện top-g, chọn ngưỡng cho mọi phương pháp, phân tích lỗi
+# Tuần 4: luật bất biến + DeepLog, chỉ số vận hành (cảnh báo giả/giờ, độ trễ, drift)
 # =============================================================
 seed: 42
 
@@ -16,6 +17,7 @@ paths:
   sample_drain_config: configs/drain3_basic.ini                         # Drain3 cơ bản: chỉ che BLK/IP/NUM
   drain_config: configs/drain3.ini
   block_stats: data/interim/block_stats.csv
+  block_context: data/interim/block_context.pkl         # thời điểm từng sự kiện + datanode của từng block
   structured_log: data/interim/HDFS.log_structured.csv
   templates: data/interim/HDFS.log_templates.csv
   sessions: data/processed/sessions.pkl
@@ -71,3 +73,11 @@ select:                      # bước 7: chọn phương án + ngưỡng của 
 validate:
   deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu
   deeplog_train_normal_sessions: 4855  # số session Normal bài báo báo cáo cho phần train đó
+
+hybrid:                      # bước 8: luật bất biến học từ session Normal của train + val
+  replica_event: E5          # "addStoredBlock: blockMap updated": mỗi bản sao được lưu xong sinh 1 dòng
+  deadline_margins: [1, 2, 5, 10]   # thời hạn = (thời gian lâu nhất trong train) × margin; chọn trên tập tune
+  max_top_g: 29              # quét g = 1..29 (29 = số EventId)
+  risk_window_sec: 3600      # phân tích phụ: cửa sổ nhìn lại khi tính rủi ro theo datanode
+  risk_thresholds: [0.05, 0.1, 0.2, 0.3]
+  drift_bin_hours: 2         # độ rộng mỗi khoảng thời gian khi đo tỉ lệ báo nhầm theo thời gian

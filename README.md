@@ -3,7 +3,9 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 3** — cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g, chọn ngưỡng
+**Trạng thái: tuần 4** — luật bất biến học từ session Normal (sự kiện lạ, nhân bản đúng hạn) kết hợp với DeepLog;
+chỉ số vận hành: cảnh báo giả mỗi giờ, độ trễ phát hiện, tỉ lệ báo nhầm theo thời gian.
+Tuần 3: cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g, chọn ngưỡng
 của mọi phương pháp (g của DeepLog, PCA, Isolation Forest) theo cùng một cách trên tập tune, phân tích lỗi.
 Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA, chia dữ liệu theo thời gian,
 baseline PCA / Isolation Forest.
@@ -48,13 +50,16 @@ project-3/
 │   ├── deeplog_scores.py    # BƯỚC 7a: rank của sự kiện thật ở mọi vị trí → kết quả của mọi g
 │   ├── model_selection.py   # BƯỚC 7b: chọn phương án + ngưỡng trên tập tune, báo cáo trên tập eval
 │   ├── evaluate.py          # precision / recall / F1, ROC-AUC, AP, recall theo nhóm, phân tích lỗi
+│   ├── block_context.py     # BƯỚC 8a: thời điểm từng sự kiện + datanode của từng block (từ log thô)
+│   ├── hybrid_detect.py     # BƯỚC 8b: luật bất biến + DeepLog; cảnh báo giả/giờ, độ trễ, drift
+│   ├── plot_results.py      # BƯỚC 8c: hình kết quả (outputs/figures/fig_*.png)
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
-│   ├── figures/             # hình
+│   ├── figures/             # hình (fig_*.png: kết quả bước 8)
 │   ├── models/              # checkpoint DeepLog (.pt), không đưa lên GitHub
-│   └── results/             # file JSON/CSV kết quả
-├── scripts/run_pipeline.sh  # chạy bước 1–7 + phân tích lỗi
+│   └── results/             # file JSON/CSV kết quả (mỗi file JSON có mục `meta`: commit, config đã dùng)
+├── scripts/run_pipeline.sh  # chạy bước 1–8 + phân tích lỗi
 ├── requirements.txt
 └── README.md
 ```
@@ -114,9 +119,15 @@ python -m src.evaluate --top-g 7  # phân tích lỗi + recall theo 2 nhóm bấ
 python -m src.baselines         # BƯỚC 6: PCA và Isolation Forest
 python -m src.deeplog_scores    # BƯỚC 7a: rank DeepLog → kết quả của mọi g, không chạy lại model
 python -m src.model_selection --tune-mode earliest   # BƯỚC 7b (chạy cả --tune-mode random)
+python -m src.block_context     # BƯỚC 8a (~40 giây, quét log thô 1 lần)
+python -m src.hybrid_detect     # BƯỚC 8b: luật bất biến + DeepLog (cần bước 7 chạy trước)
+python -m src.plot_results      # BƯỚC 8c: hình kết quả
 ```
 
-Hoặc chạy bước 1–7 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
+Hoặc chạy bước 1–8 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
+
+**Nguồn gốc kết quả:** mọi file JSON kết quả có mục `meta` (thời điểm, commit git, toàn bộ config). Checkpoint
+DeepLog lưu cấu hình lúc train; các bước sau in cảnh báo nếu checkpoint được train với cấu hình khác config hiện tại.
 
 **Chạy thử nhanh:** trong `configs/config.yaml`, đặt `parse.max_lines: 200000` để chỉ parse 200 nghìn dòng đầu.
 Khi mọi bước chạy thông suốt, đổi lại `max_lines: null` để chạy toàn bộ dữ liệu.
@@ -206,6 +217,34 @@ trong session, nên "max rank > g" chính là luật top-g. F1 trên eval (seed 
 - Theo seed (đổi `seed` trong config, chạy lại bước 4 và 7; seed 42, 1, 2, 3, 4): F1 của DeepLog 0,846 ± 0,053 khi tune
   ngẫu nhiên và 0,845 ± 0,048 khi tune sớm nhất (từ 0,79 đến 0,91). Khi tune sớm nhất, DeepLog giữ F1 ≥ 0,79 ở cả 5 seed,
   còn PCA chỉ đạt 0,172. Tuần 4 sẽ giảm độ dao động này.
+
+**Luật bất biến và bộ phát hiện kết hợp (bước 8)** — `outputs/results/hybrid_detection.json`, `hybrid_deadline.csv`,
+`hybrid_drift.csv`, `outputs/figures/fig_*.png`. `block_context.py` quét log thô một lần (~40 giây) để lấy thời điểm của
+từng sự kiện. Hai luật học từ 5.582 session Normal của train + val, không dùng nhãn:
+- Luật sự kiện lạ: train chỉ chứa 15/29 loại sự kiện. Session có sự kiện ngoài 15 loại này bị báo ngay khi sự kiện xuất hiện,
+  kể cả trong 10 sự kiện đầu mà DeepLog không dự đoán.
+- Luật nhân bản đúng hạn: mọi session Normal của train có ít nhất 3 lần E5 (`addStoredBlock: blockMap updated`, mỗi bản sao
+  được lưu xong sinh 1 dòng), lần thứ 3 đến chậm nhất 352 giây sau sự kiện đầu. Session chưa đủ 3 lần E5 sau m × 352 giây bị
+  báo; m ∈ {1, 2, 5, 10} chọn trên tập tune. Luật này bắt các session dừng giữa chừng như `E2 E1`.
+- Kết hợp: báo nếu một trong hai luật hoặc DeepLog báo; m và g chọn cùng lúc trên tập tune theo F1.
+
+Kết quả trên eval (seed 42, tune ngẫu nhiên; độ trễ tính từ sự kiện đầu tiên của block):
+
+| Phương pháp | Precision | Recall | F1 | Cảnh báo giả / giờ | Độ trễ trung vị |
+|---|---|---|---|---|---|
+| DeepLog (g = 7) | 0,847 | 0,993 | 0,915 | 77 | 148 giây |
+| Luật sự kiện lạ | 0,977 | 0,588 | 0,735 | 5,9 | 341 giây |
+| Luật nhân bản đúng hạn | 0,978 | 0,384 | 0,551 | 3,7 | 704 giây |
+| 2 luật | 0,972 | 0,776 | 0,863 | 9,6 | 704 giây |
+| Kết hợp luật + DeepLog | 0,847 | 1,000 | 0,917 | 78 | 112 giây |
+| PCA, cùng dữ liệu fit | 0,874 | 0,823 | 0,848 | 51 | 4.888 giây (chờ hết session) |
+
+- Hai luật có ít cảnh báo giả nhất và không phụ thuộc seed. DeepLog và hai luật xử lý log theo luồng nên phát hiện sớm hơn
+  nhiều so với PCA / Isolation Forest, vốn phải đếm sự kiện của cả session.
+- Tỉ lệ báo nhầm theo từng khoảng 2 giờ (`hybrid_drift.csv`, `fig_drift.png`): DeepLog có hai đỉnh 2,4% (giờ 12–14) và
+  1,8% (giờ 30–32), tức hành vi bình thường thay đổi so với đoạn train; hai luật ở mức ≤ 0,6% trừ khoảng giờ 12–14.
+- Đã thử thêm điểm rủi ro theo datanode (`hybrid_node_risk`), nhưng điểm này không phân biệt được bất thường (ROC-AUC 0,47)
+  nên không dùng.
 
 ## 6. Kế hoạch
 

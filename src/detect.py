@@ -25,7 +25,7 @@ from src.config import load_config
 from src.dataset import make_windows
 from src.evaluate import compute_metrics, save_results
 from src.model import DeepLog
-from src.utils import get_device, get_logger
+from src.utils import get_device, get_logger, run_metadata
 
 logger = get_logger(__name__)
 
@@ -100,7 +100,38 @@ def load_model(checkpoint_path, device: torch.device) -> DeepLog:
     ).to(device)
     model.load_state_dict(ckpt["model_state"])
     model.eval()
+    model.meta = ckpt.get("meta")  # nguồn gốc lúc train (None với checkpoint cũ)
     return model
+
+
+def checkpoint_summary(meta: dict | None) -> dict | None:
+    """Phần ngắn gọn của nguồn gốc checkpoint để ghi kèm kết quả: lúc train, commit, seed, cấu hình train/model."""
+    if meta is None:
+        return None
+    config = meta["config"]
+    return {"created_at": meta["created_at"], "git_commit": meta["git_commit"], "git_dirty": meta["git_dirty"],
+            "seed": config.get("seed"), "train": config.get("train"), "model": config.get("model"),
+            "split": config.get("split"), "best_epoch": meta.get("best_epoch"), "val_loss": meta.get("val_loss")}
+
+
+def config_differences(ckpt_meta: dict | None, cfg: dict, check_seed: bool = True) -> list[str]:
+    """
+    So cấu hình lúc train checkpoint với cfg hiện tại (mục model, train trừ device, split, và seed nếu check_seed).
+
+    Output: danh sách khác biệt, vd ["train.batch_size: 2048 → 512"]; rỗng nếu khớp.
+    """
+    if ckpt_meta is None:
+        return ["checkpoint không có thông tin nguồn gốc (train trước khi có run_metadata)"]
+    old = ckpt_meta["config"]
+    diffs = []
+    for section in ("model", "train", "split"):
+        old_sec, new_sec = old.get(section, {}), cfg[section]
+        for key in sorted(set(old_sec) | set(new_sec)):
+            if (section, key) != ("train", "device") and old_sec.get(key) != new_sec.get(key):
+                diffs.append(f"{section}.{key}: {old_sec.get(key)} → {new_sec.get(key)}")
+    if check_seed and old.get("seed") != cfg["seed"]:
+        diffs.append(f"seed: {old.get('seed')} → {cfg['seed']}")
+    return diffs
 
 
 def main() -> None:
@@ -117,6 +148,8 @@ def main() -> None:
 
     device = get_device(cfg["train"]["device"])
     model = load_model(paths["model_dir"] / "deeplog_best.pt", device)
+    if diffs := config_differences(model.meta, cfg):
+        logger.warning("Checkpoint được train với cấu hình KHÁC config hiện tại: %s", diffs)
 
     test_df = pd.read_pickle(paths["splits_dir"] / "test.pkl")
     if args.max_sessions:
@@ -125,7 +158,8 @@ def main() -> None:
 
     y_pred = predict_sessions(model, test_df["EventSequence"].tolist(), window_size, top_g, device)
     metrics = compute_metrics(test_df["Label"].to_numpy(), y_pred)
-    metrics.update({"top_g": top_g, "num_sessions": int(len(test_df))})
+    metrics.update({"top_g": top_g, "num_sessions": int(len(test_df)),
+                    "meta": run_metadata(cfg), "deeplog_checkpoint": checkpoint_summary(model.meta)})
 
     save_results(metrics, paths["results_dir"] / f"deeplog_metrics_g{top_g}.json")
     test_df.assign(Pred=y_pred).to_pickle(paths["results_dir"] / f"deeplog_predictions_g{top_g}.pkl")

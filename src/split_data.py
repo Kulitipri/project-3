@@ -40,10 +40,11 @@ def split_sessions(
 
     Hai chiến lược:
       - "random"       : lấy ngẫu nhiên train_normal_ratio session Normal làm train + val.
-                         Đây là cách nhiều bài làm theo, dễ cho F1 cao "ảo".
+                         Đây là đánh giá offline, trộn thời điểm bắt đầu giữa train và test.
       - "chronological": sắp xếp session Normal theo StartTime, lấy phần SỚM NHẤT làm train + val;
                          test là các session bắt đầu SAU mốc thời gian cắt.
-                         Mô phỏng đúng thực tế: train trên quá khứ, phát hiện trên tương lai.
+                         Chỉ tách theo thời điểm bắt đầu: toàn bộ sự kiện của phiên train có thể
+                         kéo dài sang giai đoạn test, nên chưa bảo đảm train hoàn toàn trên quá khứ.
 
     Với "chronological":
       - Val là phần MUỘN NHẤT của train + val (val nằm sau train về thời gian).

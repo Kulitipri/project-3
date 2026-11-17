@@ -21,4 +21,5 @@ def load_config(config_path: str | Path = "configs/config.yaml") -> dict:
         cfg = yaml.safe_load(f)
 
     cfg["paths"] = {key: PROJECT_ROOT / value for key, value in cfg["paths"].items()}
+    cfg["config_file"] = str(config_path)  # để ghi vào nguồn gốc kết quả (utils.run_metadata)
     return cfg

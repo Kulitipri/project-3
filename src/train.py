@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 from src.config import load_config
 from src.dataset import DeepLogWindowDataset
 from src.model import DeepLog
-from src.utils import ensure_dir, get_device, get_logger, load_json, save_json, set_seed
+from src.utils import ensure_dir, get_device, get_logger, load_json, run_metadata, save_json, set_seed
 
 logger = get_logger(__name__)
 
@@ -112,6 +112,7 @@ def main() -> None:
     optimizer = torch.optim.Adam(model.parameters(), lr=train_cfg["lr"])
 
     model_dir = ensure_dir(paths["model_dir"])
+    meta = run_metadata(cfg)  # lưu trong checkpoint: các bước sau biết model được train với cấu hình nào
     best_val, epochs_no_improve = math.inf, 0
     history = []
 
@@ -124,7 +125,8 @@ def main() -> None:
         if val_loss < best_val:
             best_val, epochs_no_improve = val_loss, 0
             torch.save(
-                {"model_state": model.state_dict(), "num_keys": num_keys, "model_cfg": model_cfg},
+                {"model_state": model.state_dict(), "num_keys": num_keys, "model_cfg": model_cfg,
+                 "meta": {**meta, "best_epoch": epoch, "val_loss": val_loss}},
                 model_dir / "deeplog_best.pt",
             )
         else:
@@ -133,7 +135,7 @@ def main() -> None:
                 logger.info("Early stopping tại epoch %d", epoch)
                 break
 
-    save_json(history, paths["results_dir"] / "train_history.json")
+    save_json({"meta": run_metadata(cfg), "epochs": history}, paths["results_dir"] / "train_history.json")
     logger.info("Val loss tốt nhất: %.4f — checkpoint: %s", best_val, model_dir / "deeplog_best.pt")
 
 

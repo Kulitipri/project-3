@@ -38,7 +38,7 @@ from sklearn.ensemble import IsolationForest
 
 from src.config import load_config
 from src.evaluate import compute_metrics, save_results, score_metrics
-from src.utils import get_logger, load_json
+from src.utils import get_logger, load_json, run_metadata
 
 logger = get_logger(__name__)
 
@@ -98,16 +98,17 @@ def pca_scores(F_fit: np.ndarray, F_other: list[np.ndarray], n_components: float
 
 
 def iforest_scores(F_fit: np.ndarray, F_other: list[np.ndarray], n_estimators: int,
-                   seed: int) -> tuple[np.ndarray, list[np.ndarray]]:
+                   seed: int, score_fit: bool = True) -> tuple[np.ndarray | None, list[np.ndarray]]:
     """
     Điểm bất thường Isolation Forest = -score_samples (càng lớn càng bất thường).
 
     Không dùng IsolationForest.predict(): ngưỡng mặc định của sklearn không gắn với dữ liệu,
     ngưỡng được đặt bằng phân vị điểm trên dữ liệu fit (xem main).
     Output: (điểm trên F_fit, [điểm trên từng ma trận trong F_other])
+    score_fit=False trả None thay điểm F_fit khi caller chỉ cần tune/eval; không đổi dữ liệu fit.
     """
     model = IsolationForest(n_estimators=n_estimators, random_state=seed, n_jobs=-1).fit(F_fit)
-    return -model.score_samples(F_fit), [-model.score_samples(F) for F in F_other]
+    return (-model.score_samples(F_fit) if score_fit else None), [-model.score_samples(F) for F in F_other]
 
 
 def split_unlabeled(test: pd.DataFrame, ratio: float) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -175,7 +176,7 @@ def main() -> None:
 
     results = {
         "sets": {"normal": describe(train_normal), "unlabeled": describe(unlabeled), "eval": describe(evaluation)},
-        "pca": {}, "iforest": {}, "diagnostics": {},
+        "pca": {}, "iforest": {}, "diagnostics": {}, "meta": run_metadata(cfg),
     }
     for fit_on, X in X_fit.items():
         Z_fit, Z_eval = tfidf_transform(X, X_eval)

@@ -3,7 +3,7 @@ BƯỚC 7 — Chọn phương án cho PCA, Isolation Forest và DeepLog mà KHÔ
 
 Tập test (đã sắp theo StartTime) được tách làm 2:
   - tune : tune_ratio session — có nhãn, chỉ dùng để chấm điểm và chọn phương án
-           tune_mode = "earliest": lấy các session SỚM NHẤT (chặt chẽ về thời gian: chọn trên quá khứ)
+           tune_mode = "earliest": lấy các session BẮT ĐẦU SỚM NHẤT (xử lý toàn phiên offline)
            tune_mode = "random"  : lấy ngẫu nhiên trong toàn bộ test (đại diện hơn khi phân bố đổi theo thời gian)
   - eval : phần còn lại — mỗi phương án đã chọn chỉ chạy trên đây ĐÚNG MỘT LẦN, số liệu này đưa vào báo cáo
 Nếu chọn phương án bằng F1 trên chính tập test thì con số báo cáo bị thổi phồng (chỉnh theo nhãn test).
@@ -24,10 +24,11 @@ Không gian thử của PCA / IForest (mục `select` trong config): biến đ�
 
 Input : data/processed/splits*/train.pkl, val.pkl, test.pkl, event_index.json
         outputs/results*/deeplog_ranks.pkl  (python -m src.deeplog_scores)
-Output: outputs/results*/model_selection_<tune_mode>_grid.csv — F1 trên tập tune của mọi phương án (không có số eval)
+Output: outputs/results*/model_selection_<tune_mode>_grid.csv — chỉ số tune và eval của mọi phương án cho phụ lục;
+          chỉ cột tune_f1 được dùng chọn biến thể
         outputs/results*/model_selection_<tune_mode>.json:
           pca / iforest / deeplog — phương án có F1 tune cao nhất + kết quả trên eval (P/R/F1, ROC-AUC, AP,
-                                    recall theo 2 nhóm bất thường: recall_structural / recall_sequence)
+                                    recall_unseen / recall_known theo từ vựng train, cùng nhóm cấu trúc cũ để phân tích)
           by_fit_on               — phương án tốt nhất (theo tune) của PCA / IForest cho TỪNG fit_on,
                                     để so sánh với DeepLog khi cùng dữ liệu fit
 
@@ -44,8 +45,10 @@ from sklearn.preprocessing import StandardScaler
 
 from src.baselines import build_count_matrix, iforest_scores, pca_scores, tfidf_transform
 from src.config import load_config
-from src.evaluate import compute_metrics, recall_by_group, save_results, score_metrics, structural_anomaly_mask
-from src.utils import get_logger, load_json
+from src.deeplog_scores import load_ranks_source
+from src.evaluate import (compute_metrics, recall_by_group, recall_by_unseen, unseen_event_mask,
+                          save_results, score_metrics, structural_anomaly_mask)
+from src.utils import get_logger, load_json, run_metadata
 
 logger = get_logger(__name__)
 
@@ -80,11 +83,20 @@ def run_config(method: str, params: dict, X: dict[str, np.ndarray], seed: int) -
     Output: (điểm trên tune, điểm trên eval)
     """
     X_fit = X["train_normal"] if params["fit_on"] == "train_normal" else X["tune"]
-    F_fit, (F_tune, F_eval) = make_features(params["features"], X_fit, [X["tune"], X["eval"]])
+    if method == 'iforest':
+        # Many sessions share identical counts. Fit on every original row, but score each
+        # distinct count vector once; tree scores are independent for each input row.
+        if '_unique_counts' not in X:
+            X['_unique_counts'] = [np.unique(X[name], axis=0, return_inverse=True) for name in ('tune', 'eval')]
+        unique = X['_unique_counts']
+        F_fit, (F_tune, F_eval) = make_features(params['features'], X_fit, [item[0] for item in unique])
+    else:
+        F_fit, (F_tune, F_eval) = make_features(params["features"], X_fit, [X["tune"], X["eval"]])
     if method == "pca":
         _, (s_tune, s_eval) = pca_scores(F_fit, [F_tune, F_eval], params["param"])
     else:
-        _, (s_tune, s_eval) = iforest_scores(F_fit, [F_tune, F_eval], params["param"], seed)
+        _, (s_tune, s_eval) = iforest_scores(F_fit, [F_tune, F_eval], params["param"], seed, score_fit=False)
+        s_tune, s_eval = s_tune[unique[0][1]], s_eval[unique[1][1]]
     return s_tune, s_eval
 
 
@@ -111,6 +123,8 @@ def choose_and_evaluate(params: dict, s_tune: np.ndarray, s_eval: np.ndarray, y:
     eval_metrics = {**compute_metrics(y["eval"], pred), **score_metrics(y["eval"], s_eval)}
     if "eval_structural" in y:
         eval_metrics.update(recall_by_group(y["eval"], pred, y["eval_structural"]))
+    if "eval_unseen" in y:
+        eval_metrics.update(recall_by_unseen(y["eval"], pred, y["eval_unseen"]))
     return {"params": params, "threshold": threshold, "tune_f1": tune_f1, "eval": eval_metrics}
 
 
@@ -162,6 +176,7 @@ def main() -> None:
     y = {"tune": test["Label"].to_numpy()[is_tune], "eval": test["Label"].to_numpy()[~is_tune]}
     sizes = {name: {"total": int(len(labels)), "anomaly": int(labels.sum())} for name, labels in y.items()}
     y["eval_structural"] = structural_anomaly_mask(test["EventSequence"][~is_tune].tolist(), pd.read_pickle(paths["sessions"]))
+    y["eval_unseen"] = unseen_event_mask(test["EventSequence"][~is_tune], splits["train"]["EventSequence"])
     logger.info("tune_mode=%s | tập tune / eval: %s", tune_mode, sizes)
 
     grids = {
@@ -176,6 +191,7 @@ def main() -> None:
             logger.info("%s %s: F1 tune = %.3f", method, params, candidates[method][-1]["tune_f1"])
 
     deeplog_scores = deeplog_session_scores(paths["results_dir"], test)
+    deeplog_source = load_ranks_source(paths["results_dir"], cfg) if deeplog_scores is not None else None
     if deeplog_scores is None:
         logger.warning("Không thấy deeplog_ranks.pkl trong %s — chạy deeplog_scores.py trước", paths["results_dir"])
     else:
@@ -186,11 +202,12 @@ def main() -> None:
     def pick(choices: list[dict]) -> dict:
         return max(choices, key=lambda c: c["tune_f1"])  # max() giữ phương án gặp trước khi bằng điểm
 
-    summary = {"tune_mode": tune_mode, "tune_ratio": sel["tune_ratio"], "sizes": sizes,
+    summary = {"meta": run_metadata(cfg), "deeplog_source": deeplog_source,
+               "tune_mode": tune_mode, "tune_ratio": sel["tune_ratio"], "sizes": sizes,
                **{method: pick(choices) for method, choices in candidates.items()},
                "by_fit_on": {method: {fit_on: pick([c for c in candidates[method] if c["params"]["fit_on"] == fit_on])
                                       for fit_on in sel["fit_on"]} for method in grids}}
-    rows = [{"method": method, **c["params"], "threshold": c["threshold"], "tune_f1": c["tune_f1"]}
+    rows = [{"method": method, **c["params"], "threshold": c["threshold"], "tune_f1": c["tune_f1"], **c["eval"]}
             for method, choices in candidates.items() for c in choices]
     pd.DataFrame(rows).to_csv(paths["results_dir"] / f"model_selection_{tune_mode}_grid.csv", index=False)
     save_results(summary, paths["results_dir"] / f"model_selection_{tune_mode}.json")

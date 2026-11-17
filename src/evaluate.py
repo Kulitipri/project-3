@@ -17,7 +17,7 @@ from sklearn.metrics import (average_precision_score, confusion_matrix, f1_score
                              recall_score, roc_auc_score)
 
 from src.config import load_config
-from src.utils import get_logger, load_json, save_json
+from src.utils import get_logger, load_json, save_json, run_metadata
 
 logger = get_logger(__name__)
 
@@ -86,6 +86,22 @@ def recall_by_group(y_true: np.ndarray, y_pred: np.ndarray, structural: np.ndarr
         anomaly = (y_true == 1) & mask
         result[f"anomalies_{name}"] = int(anomaly.sum())
         result[f"recall_{name}"] = float(y_pred[anomaly].mean()) if anomaly.any() else float("nan")
+    return result
+
+
+def unseen_event_mask(sequences, train_sequences) -> np.ndarray:
+    """Group sessions by events absent from gradient-training sessions; no eval labels used."""
+    seen = {event for sequence in train_sequences for event in sequence}
+    return np.array([bool(set(sequence) - seen) for sequence in sequences], dtype=bool)
+
+
+def recall_by_unseen(y_true, y_pred, unseen) -> dict:
+    """Known-event anomalies can differ in counts, length, or order; this is not an order ablation."""
+    result = {}
+    for name, mask in (("unseen", unseen), ("known", ~unseen)):
+        anomaly = (y_true == 1) & mask
+        result[f"anomalies_{name}"] = int(anomaly.sum())
+        result[f"recall_{name}"] = float(y_pred[anomaly].mean()) if anomaly.any() else float('nan')
     return result
 
 
@@ -171,6 +187,8 @@ def main() -> None:
     summary = error_analysis(pred_df, event_index)
     out_path = paths["results_dir"] / f"error_analysis_g{top_g}.csv"
     summary.to_csv(out_path, index=False)
+    save_json({'meta': run_metadata(cfg), 'prediction_source': load_json(
+        paths['results_dir'] / f'deeplog_metrics_g{top_g}.json')}, out_path.with_suffix('.meta.json'))
     logger.info("Đã lưu phân tích lỗi: %s\n%s", out_path, summary.to_string())
 
 
