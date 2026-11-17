@@ -3,11 +3,18 @@
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
 # Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu, baseline
 # Tuần 3: DeepLog (LSTM), phát hiện top-g, chọn ngưỡng cho mọi phương pháp, phân tích lỗi
-# Tuần 4: luật bất biến + DeepLog, chỉ số vận hành, độ ổn định theo seed, ghép 5 model, đối chứng chia random
+# Tuần 4: luật bất biến + DeepLog, chỉ số vận hành, độ ổn định theo seed, ghép 5 model, đối chứng chia random,
+#         điểm vận hành theo ngân sách cảnh báo giả, độ phủ thời gian của dữ liệu train
 # =============================================================
 seed: 42
 
 paths:
+  random_config: configs/config_random.yaml           # config đối chứng chia random (report_tables đọc kết quả của nó)
+  coverage_splits_dir: data/processed/time_coverage   # time_coverage.py: train/val/test của từng cấu hình
+  coverage_results_dir: outputs/time_coverage
+  coverage_models_dir: outputs/models/time_coverage
+  report_tables_dir: outputs/report_tables            # report_tables.py: bảng tổng hợp cho báo cáo
+  archive_dir: outputs/archive_batch2048              # audit_results.py: nơi chuyển file kết quả không xác minh được
   raw_log: data/raw/HDFS_v1/HDFS.log
   label_file: data/raw/HDFS_v1/preprocessed/anomaly_label.csv
   ref_templates: data/raw/HDFS_v1/preprocessed/HDFS.log_templates.csv   # 29 template chuẩn của Loghub
@@ -84,3 +91,10 @@ hybrid:                      # bước 8: luật bất biến học từ session
   risk_window_sec: 3600      # phân tích phụ: cửa sổ nhìn lại khi tính rủi ro theo datanode
   risk_thresholds: [0.05, 0.1, 0.2, 0.3]
   drift_bin_hours: 2         # độ rộng mỗi khoảng thời gian khi đo tỉ lệ báo nhầm theo thời gian
+
+operating:                   # bước 11: chọn điểm vận hành theo ngân sách cảnh báo giả thay vì F1 cao nhất
+  budgets_fp_per_hour: [1, 5, 10, 25]   # mỗi phương pháp: recall cao nhất trên tập tune mà FP/giờ <= ngân sách
+
+time_coverage:               # time_coverage.py: giữ nguyên số session train/val, đổi khoảng thời gian lấy mẫu
+  hours: 2                   # cấu hình first_2h: lấy mẫu session Normal trong 2 giờ đầu
+  time_fraction: 0.1         # cấu hình first_fraction: lấy mẫu trong 10% đầu thời gian log (~3,5 giờ)

@@ -5,7 +5,8 @@ Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train D
 
 **Trạng thái: tuần 4** — luật bất biến học từ session Normal (sự kiện lạ, nhân bản đúng hạn) kết hợp với DeepLog;
 chỉ số vận hành: cảnh báo giả mỗi giờ, độ trễ phát hiện, tỉ lệ báo nhầm theo thời gian; độ ổn định theo seed,
-ghép 5 model DeepLog, đối chứng chia random.
+ghép 5 model DeepLog, đối chứng chia random; recall theo ngân sách cảnh báo giả; độ phủ thời gian của dữ liệu train;
+bảng kết quả sinh tự động.
 Tuần 3: cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g, chọn ngưỡng
 của mọi phương pháp (g của DeepLog, PCA, Isolation Forest) theo cùng một cách trên tập tune, phân tích lỗi.
 Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA, chia dữ liệu theo thời gian,
@@ -57,13 +58,18 @@ project-3/
 │   ├── plot_results.py      # BƯỚC 8c: hình kết quả (outputs/figures/fig_*.png)
 │   ├── seed_study.py        # BƯỚC 9: train lại DeepLog với 5 seed, chạy lại bước 7–8
 │   ├── ensemble.py          # BƯỚC 10: ghép 5 model của bước 9 (trung bình xác suất)
+│   ├── operating_point.py   # BƯỚC 11: recall khi giới hạn số cảnh báo giả mỗi giờ
+│   ├── time_coverage.py     # độ phủ thời gian: train trên 9 phút / 2 giờ / 3,5 giờ đầu
+│   ├── report_tables.py     # bảng kết quả tổng hợp mọi seed, cách chia, cách tune
+│   ├── audit_results.py     # kiểm tra nguồn gốc file kết quả
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
 │   ├── figures/             # hình (fig_*.png: kết quả bước 8; figures/random/: bản chia random)
 │   ├── models/              # checkpoint DeepLog (.pt), không đưa lên GitHub
 │   └── results/             # file JSON/CSV kết quả (mỗi file JSON có mục `meta`: commit, config đã dùng)
-├── scripts/run_pipeline.sh  # chạy bước 1–10 + phân tích lỗi
+├── tests/                   # TUẦN 4: kiểm thử tự động (python -m unittest discover -s tests)
+├── scripts/run_pipeline.sh  # chạy bước 1–11 + phân tích lỗi
 ├── requirements.txt
 └── README.md
 ```
@@ -128,9 +134,13 @@ python -m src.hybrid_detect     # BƯỚC 8b: luật bất biến + DeepLog (c�
 python -m src.plot_results      # BƯỚC 8c: hình kết quả
 python -m src.seed_study        # BƯỚC 9 (~4 phút mỗi seed)
 python -m src.ensemble          # BƯỚC 10 (~2 phút, cần bước 9)
+python -m src.operating_point --tune-mode random   # BƯỚC 11 (chạy cả --tune-mode earliest; --all-runs cho mọi seed + ensemble)
+python -m src.time_coverage --run                  # độ phủ thời gian (train lại 5 seed cho mỗi cấu hình)
+python -m src.report_tables                        # bảng tổng hợp ở outputs/report_tables/
+python -m unittest discover -s tests               # kiểm thử
 ```
 
-Hoặc chạy bước 1–10 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
+Hoặc chạy bước 1–11 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
 Đối chứng chia random: `bash scripts/run_pipeline.sh configs/config_random.yaml` (kết quả ở
 `data/processed/splits_random/`, `outputs/models/random/`, `outputs/results/random/`).
 
@@ -291,6 +301,49 @@ Khi train trải đều theo thời gian, PCA phù hợp hơn. Lợi thế của
 ngắn trong quá khứ: khi chia theo thời gian, 59% session bất thường của eval có sự kiện chưa thấy khi train, khi chia
 random chỉ 34–36%.
 
+**Điểm vận hành theo ngân sách cảnh báo giả (bước 11)** — `outputs/results/operating_points_summary.csv`. Với ngân sách
+B = 1, 5, 10, 25 cảnh báo giả mỗi giờ, mỗi phương pháp chọn trên tune tham số / ngưỡng bắt nhiều bất thường nhất mà không
+vượt B, rồi chấm một lần trên eval; bộ kết hợp được phép tắt DeepLog. Chia theo thời gian, tune ngẫu nhiên, recall trên eval
+(trong ngoặc: cảnh báo giả thực tế mỗi giờ):
+
+| Phương pháp | B = 10 | B = 25 |
+|---|---|---|
+| DeepLog, 1 model (trung bình 5 seed) | 0,16 ± 0,20 (4,8) | 0,33 ± 0,31 (18,5) |
+| DeepLog, ghép 5 model | 0,42 (10,2) | 0,68 (24,3) |
+| 2 luật | 0,78 (9,6) | 0,78 (9,6) |
+| Kết hợp, 1 model (trung bình 5 seed) | 0,78 (10,0) | 0,79 (18,0) |
+| PCA, cùng dữ liệu fit | 0,59 (5,9) | 0,71 (15,4) |
+| PCA, log không nhãn của tập tune* | 0,86 (10,6) | 1,00 (23,2) |
+
+\* Tập tune ngẫu nhiên rải khắp 38 giờ nên chỉ là cận trên. Khi ngân sách được đặt trên 3,5 giờ đầu (tune sớm nhất), số
+cảnh báo giả thực tế trên eval vượt ngân sách ở hầu hết phương pháp vì hành vi bình thường thay đổi theo thời gian;
+ngưỡng cần được hiệu chỉnh định kỳ (tuần 5).
+
+**Độ phủ thời gian của dữ liệu train** — `python -m src.time_coverage --run`, kết quả ở `outputs/time_coverage/`
+(`design.json`: thiết kế và độ phủ thực tế). Giữ nguyên 5.024 train + 558 val nhưng lấy mẫu session Normal bắt đầu trong
+9 phút, 2 giờ hoặc 3,5 giờ đầu; validation là phần muộn nhất. Cả ba cấu hình dùng chung tập test (506.515 session bắt
+đầu sau 00:27 ngày 10/11) và train lại đủ 5 seed. F1 trên eval (tune sớm nhất / tune ngẫu nhiên):
+
+| Phương pháp | 9 phút đầu | 2 giờ đầu | 3,5 giờ đầu |
+|---|---|---|---|
+| DeepLog, 1 model (trung bình 5 seed) | 0,84 / 0,84 | 0,74 / 0,69 | 0,86 / 0,85 |
+| DeepLog, ghép 5 model | 0,89 / 0,89 | 0,91 / 0,60 | 0,84 / 0,90 |
+| 2 luật | 0,89 / 0,87 | 0,82 / 0,88 | 0,82 / 0,86 |
+| Kết hợp, 1 model (trung bình 5 seed) | 0,88 / 0,88 | 0,85 / 0,85 | 0,85 / 0,89 |
+| PCA, cùng dữ liệu fit | 0,12 / 0,84 | 0,18 / 0,84 | 0,18 / 0,84 |
+
+- Ở cả ba khoảng, ngưỡng của PCA chọn trên 10% sớm nhất không dùng được về sau, còn luật, DeepLog và bộ kết hợp giữ được.
+  Hai luật và bộ kết hợp có F1 bằng hoặc cao hơn PCA cùng dữ liệu ở cả 6 cấu hình.
+- Ở khoảng 2 giờ với tune ngẫu nhiên, ghép 5 model cho F1 0,60, thấp hơn trung bình từng model; nguyên nhân phân tích ở tuần 5.
+- Cách chia chỉ dựa trên thời điểm *bắt đầu* session: sự kiện của các session train kéo dài tới khoảng giờ thứ 14 của log.
+
+**Bảng kết quả sinh tự động** — `python -m src.report_tables` đọc kết quả của mọi seed, ensemble, hai cách chia, hai cách
+tune và ba cấu hình độ phủ, rồi ghi `outputs/report_tables/` (`tables.md`, `f1_same_training.csv`,
+`operating_all_selected.csv`, ...). Biến thể và ngưỡng chỉ được chọn trên tập tune; script dừng nếu thiếu seed, cách tune
+hoặc chỉ số. `python -m src.audit_results` kiểm tra nguồn gốc (mục `meta`) của các file kết quả và chuyển file không xác
+minh được vào thư mục archive (không xoá). `python -m unittest discover -s tests` chạy 9 kiểm thử cho các bước chọn ngưỡng,
+ngân sách cảnh báo giả, chia nhóm sự kiện lạ và thiết kế độ phủ thời gian.
+
 ## 6. Kế hoạch
 
 | Tuần | Công việc |
@@ -298,5 +351,5 @@ random chỉ 34–36%.
 | 1 | Tìm hiểu DeepLog, HDFS_v1; khảo sát HDFS_2k bằng Drain3 |
 | 2 | Tải HDFS_v1, parse bằng Drain3, dựng chuỗi theo block, chia dữ liệu theo thời gian, phương pháp cổ điển |
 | 3 | Cài đặt và train DeepLog, chọn g và ngưỡng của mọi phương pháp trên tập tune, phân tích lỗi (đã xong) |
-| 4 | Độ ổn định theo seed; xử lý các điểm mù của DeepLog tìm được ở phân tích lỗi; đánh giá theo số cảnh báo giả mỗi giờ, độ trễ phát hiện, drift; đối chứng chia random |
+| 4 | Độ ổn định theo seed; xử lý các điểm mù của DeepLog tìm được ở phân tích lỗi; đánh giá theo số cảnh báo giả mỗi giờ, độ trễ phát hiện, drift; đối chứng chia random (đã xong) |
 | 5 | Báo cáo cuối kỳ, slide, demo |

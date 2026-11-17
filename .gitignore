@@ -10,6 +10,7 @@ data/interim/*
 data/processed/*
 outputs/models/*
 outputs/results/*
+outputs/archive_*/
 !**/.gitkeep
 
 # macOS
@@ -19,3 +20,6 @@ outputs/results/*
 *.docx
 ~$*
 data/
+
+outputs/time_coverage/
+outputs/report_tables/
