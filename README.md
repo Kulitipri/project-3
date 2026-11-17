@@ -4,7 +4,8 @@ Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train D
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
 **Trạng thái: tuần 4** — luật bất biến học từ session Normal (sự kiện lạ, nhân bản đúng hạn) kết hợp với DeepLog;
-chỉ số vận hành: cảnh báo giả mỗi giờ, độ trễ phát hiện, tỉ lệ báo nhầm theo thời gian.
+chỉ số vận hành: cảnh báo giả mỗi giờ, độ trễ phát hiện, tỉ lệ báo nhầm theo thời gian; độ ổn định theo seed,
+ghép 5 model DeepLog, đối chứng chia random.
 Tuần 3: cài và huấn luyện DeepLog bằng PyTorch, phát hiện bất thường bằng luật top-g, chọn ngưỡng
 của mọi phương pháp (g của DeepLog, PCA, Isolation Forest) theo cùng một cách trên tập tune, phân tích lỗi.
 Tuần 2: parse HDFS_v1 bằng Drain3 (khớp 100% với Loghub), dựng chuỗi theo block, EDA, chia dữ liệu theo thời gian,
@@ -25,6 +26,7 @@ flowchart LR
 project-3/
 ├── configs/
 │   ├── config.yaml          # toàn bộ đường dẫn + tham số (đọc qua src/config.py)
+│   ├── config_random.yaml   # TUẦN 4: như trên nhưng chia random, kết quả ghi vào thư mục riêng
 │   ├── drain3_basic.ini     # TUẦN 1: Drain3 cơ bản, chỉ che mã block, IP, con số
 │   └── drain3.ini           # TUẦN 2: Drain3 đã chỉnh cho HDFS_v1 (29 template)
 ├── data/                    # không đưa lên GitHub
@@ -43,7 +45,7 @@ project-3/
 │   ├── build_sequences.py   # BƯỚC 2: gom sự kiện thành chuỗi theo block, gắn nhãn
 │   ├── split_data.py        # BƯỚC 3: chia train / val / test
 │   ├── dataset.py           # TUẦN 3: cửa sổ trượt h sự kiện + Dataset PyTorch (pad session ngắn)
-│   ├── model.py             # TUẦN 3: mô hình DeepLog (Embedding → LSTM 2 lớp → Linear)
+│   ├── model.py             # TUẦN 3: mô hình DeepLog (Embedding → LSTM 2 lớp → Linear); tuần 4: ghép nhiều model
 │   ├── train.py             # BƯỚC 4: train DeepLog, early stopping theo val loss
 │   ├── detect.py            # BƯỚC 5: phát hiện bằng luật top-g
 │   ├── baselines.py         # BƯỚC 6: PCA, Isolation Forest (ngưỡng mặc định)
@@ -53,13 +55,15 @@ project-3/
 │   ├── block_context.py     # BƯỚC 8a: thời điểm từng sự kiện + datanode của từng block (từ log thô)
 │   ├── hybrid_detect.py     # BƯỚC 8b: luật bất biến + DeepLog; cảnh báo giả/giờ, độ trễ, drift
 │   ├── plot_results.py      # BƯỚC 8c: hình kết quả (outputs/figures/fig_*.png)
+│   ├── seed_study.py        # BƯỚC 9: train lại DeepLog với 5 seed, chạy lại bước 7–8
+│   ├── ensemble.py          # BƯỚC 10: ghép 5 model của bước 9 (trung bình xác suất)
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
-│   ├── figures/             # hình (fig_*.png: kết quả bước 8)
+│   ├── figures/             # hình (fig_*.png: kết quả bước 8; figures/random/: bản chia random)
 │   ├── models/              # checkpoint DeepLog (.pt), không đưa lên GitHub
 │   └── results/             # file JSON/CSV kết quả (mỗi file JSON có mục `meta`: commit, config đã dùng)
-├── scripts/run_pipeline.sh  # chạy bước 1–8 + phân tích lỗi
+├── scripts/run_pipeline.sh  # chạy bước 1–10 + phân tích lỗi
 ├── requirements.txt
 └── README.md
 ```
@@ -122,9 +126,13 @@ python -m src.model_selection --tune-mode earliest   # BƯỚC 7b (chạy cả -
 python -m src.block_context     # BƯỚC 8a (~40 giây, quét log thô 1 lần)
 python -m src.hybrid_detect     # BƯỚC 8b: luật bất biến + DeepLog (cần bước 7 chạy trước)
 python -m src.plot_results      # BƯỚC 8c: hình kết quả
+python -m src.seed_study        # BƯỚC 9 (~4 phút mỗi seed)
+python -m src.ensemble          # BƯỚC 10 (~2 phút, cần bước 9)
 ```
 
-Hoặc chạy bước 1–8 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
+Hoặc chạy bước 1–10 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
+Đối chứng chia random: `bash scripts/run_pipeline.sh configs/config_random.yaml` (kết quả ở
+`data/processed/splits_random/`, `outputs/models/random/`, `outputs/results/random/`).
 
 **Nguồn gốc kết quả:** mọi file JSON kết quả có mục `meta` (thời điểm, commit git, toàn bộ config). Checkpoint
 DeepLog lưu cấu hình lúc train; các bước sau in cảnh báo nếu checkpoint được train với cấu hình khác config hiện tại.
@@ -211,12 +219,10 @@ trong session, nên "max rank > g" chính là luật top-g. F1 trên eval (seed 
 
 - Cùng dữ liệu fit và tune ngẫu nhiên (seed 42): DeepLog 0,915, PCA 0,848. Tune trên 3,5 giờ đầu: ngưỡng PCA không dùng
   được về sau (báo nhầm hơn 100 nghìn session), còn g = 7 của DeepLog vẫn dùng được.
-- DeepLog có ROC-AUC 0,997 trên eval, cao nhất trong các phương án hợp lệ về thời gian.
-- Recall theo 2 nhóm bất thường của EDA (`recall_structural` / `recall_sequence`): DeepLog 0,988 / 0,997;
+- ROC-AUC của DeepLog trên eval: 0,997 ở seed 42; trung bình 5 seed ở bước 9–10.
+- Recall theo 2 nhóm bất thường của EDA (`recall_structural` / `recall_sequence`): DeepLog (seed 42) 0,988 / 0,997;
   PCA fit trên Normal 0,569 / 0,996 (bỏ sót toàn bộ 2.601 session chỉ có `E2 E1` hoặc `E1 E2`).
-- Theo seed (đổi `seed` trong config, chạy lại bước 4 và 7; seed 42, 1, 2, 3, 4): F1 của DeepLog 0,846 ± 0,053 khi tune
-  ngẫu nhiên và 0,845 ± 0,048 khi tune sớm nhất (từ 0,79 đến 0,91). Khi tune sớm nhất, DeepLog giữ F1 ≥ 0,79 ở cả 5 seed,
-  còn PCA chỉ đạt 0,172. Tuần 4 sẽ giảm độ dao động này.
+- Độ dao động theo seed và số trung bình 5 seed: xem bước 9–10 bên dưới.
 
 **Luật bất biến và bộ phát hiện kết hợp (bước 8)** — `outputs/results/hybrid_detection.json`, `hybrid_deadline.csv`,
 `hybrid_drift.csv`, `outputs/figures/fig_*.png`. `block_context.py` quét log thô một lần (~40 giây) để lấy thời điểm của
@@ -245,6 +251,45 @@ Kết quả trên eval (seed 42, tune ngẫu nhiên; độ trễ tính từ sự
   1,8% (giờ 30–32), tức hành vi bình thường thay đổi so với đoạn train; hai luật ở mức ≤ 0,6% trừ khoảng giờ 12–14.
 - Đã thử thêm điểm rủi ro theo datanode (`hybrid_node_risk`), nhưng điểm này không phân biệt được bất thường (ROC-AUC 0,47)
   nên không dùng.
+
+**Độ ổn định theo seed và ghép 5 model (bước 9–10)** — `outputs/results/seed_study_summary.csv`, `ensemble_summary.csv`.
+`seed_study.py` train lại DeepLog với seed 42, 1, 2, 3, 4 (giữ nguyên dữ liệu, tập tune, tập eval) rồi chạy lại bước 7–8;
+`ensemble.py` lấy trung bình phân phối xác suất của 5 model rồi áp luật top-g như cũ (g chọn trên tune).
+F1 trên eval, chia theo thời gian (cảnh báo giả mỗi giờ ghi theo tune ngẫu nhiên / sớm nhất):
+
+| Phương pháp | Tune ngẫu nhiên | Tune sớm nhất | Cảnh báo giả / giờ |
+|---|---|---|---|
+| DeepLog, 1 model (trung bình 5 seed) | 0,840 ± 0,054 | 0,827 ± 0,061 | 70 / 99 |
+| DeepLog, ghép 5 model | 0,889 | 0,885 | 75 / 84 |
+| 2 luật | 0,863 | 0,855 | 9,6 / 6,6 |
+| Kết hợp, 1 model (trung bình 5 seed) | 0,883 ± 0,025 | 0,853 ± 0,055 | 63 / 99 |
+| Kết hợp, ghép 5 model | 0,893 | 0,889 | 74 / 85 |
+| PCA, cùng dữ liệu fit | 0,848 | 0,172 | 51 / 3.900 |
+| Isolation Forest, log không nhãn của tập tune | 0,731 ± 0,065 | 0,829 ± 0,004 | 112 / 14 |
+
+- Kết hợp ≥ DeepLog ở cả 10 lần chạy (5 seed × 2 cách tune), độ lệch chuẩn nhỏ hơn.
+- Cập nhật so với tuần 3: các số 0,915 / 0,903, ROC-AUC 0,997 và recall theo 2 nhóm ở bước 7 là của seed 42. Trung bình
+  5 seed: F1 0,840 ± 0,054 / 0,827 ± 0,061 (từ 0,76 đến 0,92 theo seed), ROC-AUC 0,955 / 0,968 (từ 0,913 đến 0,997).
+  Khi tune sớm nhất, F1 thấp nhất của DeepLog là 0,76, vẫn cao hơn nhiều PCA (0,172), và ngang Isolation Forest học
+  trên log không nhãn (0,829). Batch 2048 (bản tuần 2–3) và batch 512 cho F1 trung bình tương đương
+  (0,855 và 0,840 khi tune ngẫu nhiên).
+- Nguồn dao động: 36,7% session bất thường có ≤ 10 sự kiện; với chúng DeepLog chỉ đoán sự kiện cuối từ cửa sổ gần như toàn
+  PAD, loại cửa sổ chưa gặp khi train (session train ngắn nhất dài 22 sự kiện). Ghép 5 model làm mất phần tuỳ ý này.
+
+**Đối chứng chia random** — `bash scripts/run_pipeline.sh configs/config_random.yaml` (kết quả ở `outputs/results/random/`,
+không ghi đè bản chia theo thời gian). 5.582 session Normal của train + val lấy ngẫu nhiên trên cả 38 giờ:
+
+| Phương pháp | Tune ngẫu nhiên | Tune sớm nhất |
+|---|---|---|
+| DeepLog, 1 model (trung bình 5 seed) | 0,776 ± 0,005 | 0,759 ± 0,011 |
+| DeepLog, ghép 5 model | 0,782 | 0,768 |
+| 2 luật | 0,698 | 0,639 |
+| Kết hợp, 1 model (trung bình 5 seed) | 0,782 ± 0,006 | 0,754 ± 0,011 |
+| PCA, cùng dữ liệu fit | 0,987 | 0,936 |
+
+Khi train trải đều theo thời gian, PCA phù hợp hơn. Lợi thế của luật và DeepLog gắn với trường hợp train chỉ phủ một đoạn
+ngắn trong quá khứ: khi chia theo thời gian, 59% session bất thường của eval có sự kiện chưa thấy khi train, khi chia
+random chỉ 34–36%.
 
 ## 6. Kế hoạch
 

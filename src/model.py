@@ -36,3 +36,21 @@ class DeepLog(nn.Module):
         """
         out, _ = self.lstm(self.embedding(x))  # (batch, window, hidden)
         return self.fc(out[:, -1, :])
+
+
+class DeepLogEnsemble(nn.Module):
+    """
+    Ghép nhiều DeepLog (cùng kiến trúc, khác seed) bằng cách lấy TRUNG BÌNH phân phối xác suất dự đoán.
+
+    forward trả về log của xác suất trung bình (batch, num_keys): dùng thay logits của DeepLog ở mọi chỗ
+    chỉ cần xếp hạng (luật top-g, rank). Lý do: một model đơn lẻ dự đoán tuỳ ý ở ngữ cảnh chưa gặp lúc train
+    (vd cửa sổ toàn PAD của session ngắn), nên kết quả đổi mạnh theo seed; lấy trung bình làm mất phần tuỳ ý đó.
+    """
+
+    def __init__(self, models: list[nn.Module]):
+        super().__init__()
+        self.models = nn.ModuleList(models)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        probs = torch.stack([torch.softmax(m(x), dim=1) for m in self.models]).mean(dim=0)
+        return torch.log(probs.clamp_min(1e-12))

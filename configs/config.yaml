@@ -3,7 +3,7 @@
 # Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
 # Tuần 2: parse HDFS_v1, dựng chuỗi theo block, EDA, chia dữ liệu, baseline
 # Tuần 3: DeepLog (LSTM), phát hiện top-g, chọn ngưỡng cho mọi phương pháp, phân tích lỗi
-# Tuần 4: luật bất biến + DeepLog, chỉ số vận hành (cảnh báo giả/giờ, độ trễ, drift)
+# Tuần 4: luật bất biến + DeepLog, chỉ số vận hành, độ ổn định theo seed, ghép 5 model, đối chứng chia random
 # =============================================================
 seed: 42
 
@@ -69,6 +69,9 @@ select:                      # bước 7: chọn phương án + ngưỡng của 
   iforest_n_estimators: [100, 300]
   fit_on: [train_normal, unlabeled_tune]   # unlabeled_tune: fit PCA/IForest trên tập tune KHÔNG dùng nhãn
   # ngưỡng của mọi phương pháp (kể cả g của DeepLog) = ngưỡng cho F1 cao nhất trên tập tune
+
+robustness:
+  seeds: [42, 1, 2, 3, 4]    # seed_study.py: train lại DeepLog với từng seed; tập tune / eval giữ nguyên
 
 validate:
   deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu

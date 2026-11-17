@@ -1,0 +1,95 @@
+# =============================================================
+# Cấu hình thí nghiệm chia RANDOM (so với chronological trong config.yaml)
+# Giống hệt config.yaml, chỉ khác split.strategy và splits_dir/model_dir/results_dir
+# để không ghi đè kết quả chronological. Bước 1–2 dùng chung đầu ra.
+# Mọi đường dẫn tính từ thư mục gốc project (~/project-3)
+# =============================================================
+seed: 42
+
+paths:
+  random_config: configs/config_random.yaml
+  coverage_splits_dir: data/processed/time_coverage
+  coverage_results_dir: outputs/time_coverage
+  coverage_models_dir: outputs/models/time_coverage
+  report_tables_dir: outputs/report_tables
+  archive_dir: outputs/archive_batch2048
+  raw_log: data/raw/HDFS_v1/HDFS.log
+  label_file: data/raw/HDFS_v1/preprocessed/anomaly_label.csv
+  ref_templates: data/raw/HDFS_v1/preprocessed/HDFS.log_templates.csv   # 29 template chuẩn của Loghub
+  ref_traces: data/raw/HDFS_v1/preprocessed/Event_traces.csv            # chuỗi sự kiện chuẩn theo block
+  drain_config: configs/drain3.ini
+  block_stats: data/interim/block_stats.csv
+  block_context: data/interim/block_context.pkl
+  structured_log: data/interim/HDFS.log_structured.csv
+  templates: data/interim/HDFS.log_templates.csv
+  sessions: data/processed/sessions.pkl
+  event_index: data/processed/event_index.json
+  splits_dir: data/processed/splits_random
+  model_dir: outputs/models/random
+  results_dir: outputs/results/random
+
+parse:
+  log_format: "<Date> <Time> <Pid> <Level> <Component>: <Content>"
+  max_lines: null            # đặt 200000 để chạy thử nhanh; null = parse toàn bộ ~11 triệu dòng
+
+split:
+  strategy: random           # chronological | random
+  train_normal_ratio: 0.01   # tỉ lệ session normal dùng để train (bài báo DeepLog dùng ~1%)
+  val_ratio: 0.1             # tỉ lệ trích từ phần train để làm validation
+
+model:
+  window_size: 10            # h trong bài báo: số sự kiện nhìn lại
+  embedding_dim: 32
+  hidden_size: 64
+  num_layers: 2
+
+train:
+  batch_size: 512
+  epochs: 50
+  lr: 0.001
+  patience: 5                # early stopping: dừng nếu val loss không giảm sau N epoch
+  device: auto               # auto | mps | cpu
+
+detect:
+  top_g: 9                   # g trong bài báo: sự kiện thật phải nằm trong top-g dự đoán
+
+baseline:                    # bước 6: cấu hình MẶC ĐỊNH, không chỉnh theo nhãn (chỉnh ở bước 7, mục select)
+  unlabeled_ratio: 0.1       # 10% session SỚM NHẤT của test, bỏ nhãn → dữ liệu fit kiểu unsupervised; chấm trên 90% còn lại
+  normal_threshold_percentile: 99   # fit trên session Normal: ngưỡng chấp nhận ~1% báo nhầm trên dữ liệu fit
+  contamination: 0.03        # fit trên dữ liệu không nhãn: giả định ~3% là bất thường → ngưỡng = phân vị 97
+  pca_n_components: 0.95     # giữ số thành phần giải thích 95% phương sai
+  iforest_n_estimators: 100
+
+select:
+  tune_ratio: 0.1            # 10% session của test (có nhãn) dùng để chọn phương án; báo cáo trên 90% còn lại
+  tune_mode: random          # earliest = 10% sớm nhất | random = 10% ngẫu nhiên trong test
+  tune_seed: 42              # seed chọn 10% ngẫu nhiên (tune_mode random) — tách khỏi seed của mô hình
+  pca_features: [standard, raw, tfidf, presence, log1p]
+  pca_n_components: [0.9, 0.95, 0.99]
+  iforest_features: [raw, presence, log1p]
+  iforest_n_estimators: [100, 300]
+  fit_on: [train_normal, unlabeled_tune]   # unlabeled_tune: fit PCA/IForest trên tập tune KHÔNG dùng nhãn (kiểu Loglizer)
+  # ngưỡng của mọi phương pháp (kể cả g của DeepLog) = ngưỡng cho F1 cao nhất trên tập tune
+
+robustness:
+  seeds: [42, 1, 2, 3, 4]    # seed_study.py: train lại DeepLog với từng seed; tập tune / eval giữ nguyên
+
+validate:
+  deeplog_train_lines: 100000          # bài báo DeepLog lấy session train từ 100k dòng log đầu
+  deeplog_train_normal_sessions: 4855  # số session Normal bài báo báo cáo cho phần train đó
+
+hybrid:
+  replica_event: E5          # "addStoredBlock: blockMap updated" — mỗi bản sao được lưu xong sinh 1 dòng
+  deadline_margins: [1, 2, 5, 10]   # deadline = (thời gian lâu nhất trong train) × margin; chọn trên tập tune
+  max_top_g: 29              # quét g = 1..29 (29 = số EventId)
+  risk_window_sec: 3600      # phân tích phụ: cửa sổ nhìn lại khi tính rủi ro theo datanode
+  risk_thresholds: [0.05, 0.1, 0.2, 0.3]
+  drift_bin_hours: 2         # độ rộng mỗi khoảng thời gian khi đo drift
+
+operating:                   # operating_point.py: chọn điểm vận hành theo ngân sách cảnh báo giả thay vì F1 cao nhất
+  budgets_fp_per_hour: [1, 5, 10, 25]   # mỗi phương pháp: recall cao nhất trên tập tune mà FP/giờ <= ngân sách
+
+# Sensitivity varies session start-time coverage, with identical train/val sizes.
+time_coverage:
+  hours: 2
+  time_fraction: 0.1
