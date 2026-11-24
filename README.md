@@ -3,7 +3,10 @@
 Mục tiêu: parse log HDFS → tạo chuỗi sự kiện theo block → train DeepLog (LSTM)
 → phát hiện bất thường bằng luật top-g → so sánh với một phương pháp cổ điển (PCA / Isolation Forest).
 
-**Trạng thái: tuần 4** — luật bất biến học từ session Normal (sự kiện lạ, nhân bản đúng hạn) kết hợp với DeepLog;
+**Trạng thái: tuần 5** — phát hiện theo luồng: demo phát lại log theo thời gian, cảnh báo kèm lý do, kiểm tra trùng kết quả
+offline ở mọi block; tính lại kết quả và độ trễ theo quy tắc không dùng sự kiện tương lai;
+cách chấm mới của DeepLog (độ bất ngờ trộn tần suất), phản hồi người vận hành, đối chứng không học sâu.
+Tuần 4: luật bất biến học từ session Normal (sự kiện lạ, nhân bản đúng hạn) kết hợp với DeepLog;
 chỉ số vận hành: cảnh báo giả mỗi giờ, độ trễ phát hiện, tỉ lệ báo nhầm theo thời gian; độ ổn định theo seed,
 ghép 5 model DeepLog, đối chứng chia random; recall theo ngân sách cảnh báo giả; độ phủ thời gian của dữ liệu train;
 bảng kết quả sinh tự động.
@@ -62,6 +65,11 @@ project-3/
 │   ├── time_coverage.py     # độ phủ thời gian: train trên 9 phút / 2 giờ / 3,5 giờ đầu
 │   ├── report_tables.py     # bảng kết quả tổng hợp mọi seed, cách chia, cách tune
 │   ├── audit_results.py     # kiểm tra nguồn gốc file kết quả
+│   ├── stream_offline.py    # BƯỚC 12 (tuần 5): kết quả offline theo quy tắc chạy được theo luồng
+│   ├── stream_detector.py   # TUẦN 5: bộ phát hiện theo luồng (DeepLog ghép + hai luật), không nhìn tương lai
+│   ├── stream_compare.py    # BƯỚC 15 (tuần 5): độ bất ngờ trộn tần suất, luật hiếm, Markov, phản hồi; chốt trên holdout
+│   ├── stream_feedback.py   # BƯỚC 14 (tuần 5): chờ xác nhận + phản hồi người vận hành, đối chứng n-gram
+│   ├── stream_demo.py       # BƯỚC 13 (tuần 5): demo phát lại log, kiểm tra demo = offline, đo tốc độ
 │   ├── block_stats.py       # vị trí, thời gian, nhãn của từng block
 │   └── validate_parsing.py  # so kết quả parse với đáp án Loghub
 ├── outputs/
@@ -137,10 +145,16 @@ python -m src.ensemble          # BƯỚC 10 (~2 phút, cần bước 9)
 python -m src.operating_point --tune-mode random   # BƯỚC 11 (chạy cả --tune-mode earliest; --all-runs cho mọi seed + ensemble)
 python -m src.time_coverage --run                  # độ phủ thời gian (train lại 5 seed cho mỗi cấu hình)
 python -m src.report_tables                        # bảng tổng hợp ở outputs/report_tables/
+python -m src.stream_offline                       # BƯỚC 12 (~1 phút, cần bước 9–10)
+python -m src.stream_demo --start-hour 31 --speed 600 --max-alerts 20 --show-labels   # BƯỚC 13: demo
+python -m src.stream_demo --source log --speed 0   # demo đọc log thô (200 nghìn dòng đầu)
+python -m src.stream_feedback                      # BƯỚC 14 (~3 phút, sau bước 12)
+python -m src.stream_compare                       # BƯỚC 15 (~5 phút, cần bước 9–10)
+python -m src.stream_demo --verify                 # phát lại toàn bộ, so từng block với bước 12 (~30 giây)
 python -m unittest discover -s tests               # kiểm thử
 ```
 
-Hoặc chạy bước 1–11 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
+Hoặc chạy bước 1–15 và phân tích lỗi liên tiếp: `bash scripts/run_pipeline.sh`.
 Đối chứng chia random: `bash scripts/run_pipeline.sh configs/config_random.yaml` (kết quả ở
 `data/processed/splits_random/`, `outputs/models/random/`, `outputs/results/random/`).
 
@@ -255,8 +269,9 @@ Kết quả trên eval (seed 42, tune ngẫu nhiên; độ trễ tính từ sự
 | Kết hợp luật + DeepLog | 0,847 | 1,000 | 0,917 | 78 | 112 giây |
 | PCA, cùng dữ liệu fit | 0,874 | 0,823 | 0,848 | 51 | 4.888 giây (chờ hết session) |
 
-- Hai luật có ít cảnh báo giả nhất và không phụ thuộc seed. DeepLog và hai luật xử lý log theo luồng nên phát hiện sớm hơn
-  nhiều so với PCA / Isolation Forest, vốn phải đếm sự kiện của cả session.
+- Hai luật có ít cảnh báo giả nhất và không phụ thuộc seed. Độ trễ của DeepLog trong bảng này được đo trên session đã đủ
+  sự kiện: session có từ 10 sự kiện trở xuống được chấm ở sự kiện cuối, điều mà hệ thống chạy theo luồng không biết trước.
+  Số đo theo luồng ở bước 12–13 bên dưới thay cho nhận định "phát hiện sớm hơn nhiều" của bản tuần 4.
 - Tỉ lệ báo nhầm theo từng khoảng 2 giờ (`hybrid_drift.csv`, `fig_drift.png`): DeepLog có hai đỉnh 2,4% (giờ 12–14) và
   1,8% (giờ 30–32), tức hành vi bình thường thay đổi so với đoạn train; hai luật ở mức ≤ 0,6% trừ khoảng giờ 12–14.
 - Đã thử thêm điểm rủi ro theo datanode (`hybrid_node_risk`), nhưng điểm này không phân biệt được bất thường (ROC-AUC 0,47)
@@ -317,7 +332,7 @@ vượt B, rồi chấm một lần trên eval; bộ kết hợp được phép 
 
 \* Tập tune ngẫu nhiên rải khắp 38 giờ nên chỉ là cận trên. Khi ngân sách được đặt trên 3,5 giờ đầu (tune sớm nhất), số
 cảnh báo giả thực tế trên eval vượt ngân sách ở hầu hết phương pháp vì hành vi bình thường thay đổi theo thời gian;
-ngưỡng cần được hiệu chỉnh định kỳ (tuần 5).
+ngưỡng cần được hiệu chỉnh định kỳ (mục 6).
 
 **Độ phủ thời gian của dữ liệu train** — `python -m src.time_coverage --run`, kết quả ở `outputs/time_coverage/`
 (`design.json`: thiết kế và độ phủ thực tế). Giữ nguyên 5.024 train + 558 val nhưng lấy mẫu session Normal bắt đầu trong
@@ -334,15 +349,95 @@ ngưỡng cần được hiệu chỉnh định kỳ (tuần 5).
 
 - Ở cả ba khoảng, ngưỡng của PCA chọn trên 10% sớm nhất không dùng được về sau, còn luật, DeepLog và bộ kết hợp giữ được.
   Hai luật và bộ kết hợp có F1 bằng hoặc cao hơn PCA cùng dữ liệu ở cả 6 cấu hình.
-- Ở khoảng 2 giờ với tune ngẫu nhiên, ghép 5 model cho F1 0,60, thấp hơn trung bình từng model; nguyên nhân phân tích ở tuần 5.
+- Ở khoảng 2 giờ với tune ngẫu nhiên, ghép 5 model cho F1 0,60, thấp hơn trung bình từng model; nguyên nhân chưa phân tích (mục 6).
 - Cách chia chỉ dựa trên thời điểm *bắt đầu* session: sự kiện của các session train kéo dài tới khoảng giờ thứ 14 của log.
+
+**Phát hiện theo luồng (bước 12–14, tuần 5)** — `outputs/results/stream/`: `offline.json`, `offline_summary.csv`,
+`verify.json`, `feedback.json`, `feedback_table.csv`, `log_sample.json`, `demo_alerts.csv`. Khi log đang chảy, DeepLog chỉ
+chấm được từ sự kiện thứ 11; session ngắn (37% bất thường của tập eval tune ngẫu nhiên, không có session Normal nào) do hai
+luật phụ trách. Ngưỡng chọn trên 10% session sớm nhất; trong các m có F1 không khác nhau có ý nghĩa (bootstrap theo cặp) lấy
+m nhỏ nhất. Tập "strict" gồm 453.152 session (10.943 bất thường) bắt đầu sau giờ 14,4, khi mọi session train / val / tune đã
+kết thúc. DeepLog ghép 5 model, g = 7:
+
+| Phương pháp (tập strict) | Precision | Recall | F1 | Cảnh báo giả / giờ | Độ trễ trung vị |
+|---|---|---|---|---|---|
+| DeepLog chấm cả session như tuần 3–4 (không chạy được theo luồng) | 0,809 | 0,992 | 0,891 | 105 | 358 giây |
+| DeepLog theo luồng | 0,741 | 0,669 | 0,703 | 105 | 4.723 giây |
+| 2 luật (m = 1) | 0,944 | 0,839 | 0,888 | 22 | 352 giây |
+| 2 luật (m = 2) | 0,988 | 0,810 | 0,890 | 4,5 | 704 giây |
+| Kết hợp theo luồng (m = 2) | 0,805 | 1,000 | 0,892 | 109 | 704 giây |
+| Kết hợp + phản hồi sau 1 giờ + chờ xác nhận | 0,895 | 0,983 | 0,937 | 52 | 1.263 giây |
+| Kết hợp + phản hồi sau 6 giờ + chờ xác nhận | 0,836 | 0,990 | 0,907 | 88 | 1.405 giây |
+| Kết hợp + phản hồi sau 24 giờ + chờ xác nhận | 0,824 | 0,999 | 0,903 | 96 | 1.609 giây |
+| *Đối chứng:* n-gram n = 2 + 2 luật, không phản hồi | 0,038 | 1,000 | 0,074 | 11.310 | 704 giây |
+| *Đối chứng:* n-gram n = 2 + 2 luật + phản hồi sau 1 giờ + chờ | 0,888 | 0,996 | 0,939 | 57 | 1.560 giây |
+
+- Không phản hồi: DeepLog bắt 2.073 trong 2.074 bất thường mà hai luật (m = 2) bỏ sót, đổi lại 2.536 cảnh báo giả. Nguyên nhân báo
+  nhầm: tại lúc trượt top-g nhiều phiên bình thường và bất thường có đúng cùng 10 sự kiện; sự kiện E9 (sao chép lại block)
+  chỉ có trong 1/5.582 session train.
+- Phản hồi (bước 14): khi DeepLog trượt thì chờ tối đa k sự kiện / H giây rồi mới báo, mẫu đã được xác nhận bình thường thì
+  thôi báo. Nhãn chỉ có cho block DeepLog đã báo và chỉ về sau khi session kết thúc + delay. k = 20, H = 3600 chọn trên tune.
+  Trung bình 5 seed (strict): F1 0,857 ± 0,059 → 0,914 ± 0,036 (nhãn sau 1 giờ).
+- Giới hạn: n-gram cùng cơ chế phản hồi đạt F1 tương đương trên strict (0,939), nên phần tăng chủ yếu nhờ phản hồi chứ không
+  phải riêng học sâu. DeepLog hơn ở tập eval đầy đủ (0,923 so với 0,897) và hỏi người vận hành ít hơn (4.169 so với 6.441 lần
+  trên toàn luồng). Với chia random, phản hồi không giúp (F1 0,768 → 0,763). Tinh chỉnh LSTM bằng phản hồi đã thử 4 cấu hình
+  và không dùng: mỗi cấu hình đều làm sụp F1 ở đoạn đầu hoặc đoạn sau.
+- Demo và bản chạy luồng có phản hồi trùng bản offline viết độc lập ở cả 569.276 block. Tốc độ lõi khoảng 600 nghìn sự
+  kiện/giây, kể cả parse trên 200 nghìn dòng log thô khoảng 77 nghìn dòng/giây; log thật trung bình 80, cao nhất 5.173.
+- Chuyển dòng log thô thành sự kiện theo template đã đóng băng: khớp chuỗi của bước 2 ở cả 15.639 block trong 200 nghìn
+  dòng đầu (chưa chạy trên toàn bộ file log).
+
+**So sánh cuối và cách chấm mới của DeepLog (bước 15)** — `<results_dir>/stream/compare.csv` của từng config. Tham số chọn trên tune; phần
+`holdout` (phiên bắt đầu sau giờ 26) được chạy sau khi đã chốt các ứng viên, nhưng nó nằm trong tập strict mà bước 12–14 đã
+xem cho các phương pháp trước, nên không hoàn toàn độc lập. Cách chấm mới: DeepLog báo theo độ bất ngờ −log p,
+p = (1 − eps)·p_LSTM + eps·tần suất chung của sự kiện, thay cho xếp hạng top-g. Lý do: sự kiện hiếm có trong 1–3 session train
+(E24, E23) lọt cả luật "chưa từng thấy" lẫn top-7. Đối chứng không học sâu: "luật hiếm" = báo sự kiện có trong ≤ c session
+train (c chọn trên tune; trước đây khóa c = 0) và Markov cùng phép trộn. F1 (tập eval / holdout):
+
+| Phương pháp | Chia thời gian | Chia ngẫu nhiên | Train 2 giờ đầu | Train 3,5 giờ đầu |
+|---|---|---|---|---|
+| Hai luật cũ (c = 0) | 0,856 / 0,914 | 0,671 / 0,645 | 0,873 / 0,895 | 0,873 / 0,894 |
+| DeepLog xếp hạng + hai luật cũ | 0,886 / 0,872 | 0,768 / 0,710 | 0,873 / 0,894 | 0,906 / 0,877 |
+| **DeepLog độ bất ngờ trộn + hai luật cũ** | 0,931 / 0,893 | 0,956 / 0,937 | 0,918 / 0,878 | 0,918 / 0,878 |
+| Luật hiếm + hạn chờ (đối chứng) | 0,931 / 0,893 | 0,934 / 0,894 | 0,918 / 0,878 | 0,918 / 0,878 |
+| Markov trộn tần suất + hai luật cũ (đối chứng) | 0,931 / 0,893 | 0,934 / 0,893 | 0,908 / 0,878 | 0,918 / 0,878 |
+
+- So với DeepLog xếp hạng: hơn ở cả 4 cấu hình trên eval; trên holdout hơn rõ ở 2 cấu hình, bằng ở 1, thua ở 1 (0,878 so với 0,894).
+- Chia thời gian, tập eval: cảnh báo giả 88 → 60 mỗi giờ so với DeepLog xếp hạng, sót 2 / 14.027 bất thường.
+- Cấu hình duy nhất DeepLog hơn luật hiếm là chia ngẫu nhiên, nhưng ở đó 3.015 / 5.582 session train bắt đầu sau giờ 26, tức mạng
+  đã thấy tương lai: kết quả này chỉ để tham khảo, KHÔNG phải bằng chứng cho phát hiện theo luồng.
+- Hiệu F1 holdout (chia thời gian) giữa DeepLog độ bất ngờ và hai luật cũ: −0,016, khoảng tin cậy 95% [−0,19; 0,09] khi lấy mẫu lại
+  theo giờ (11 giờ, báo nhầm dồn vào giờ 31). Không kết luận được bên nào hơn.
+- So với luật hiếm: bằng ở 3 cấu hình, hơn ở chia ngẫu nhiên. Bản chất HDFS_v1 là phần lớn bất thường chứa một loại sự kiện hiếm,
+  nên phép đếm đơn giản đã rất mạnh.
+- Trên holdout, hai luật cũ cao nhất ở 3/4 cấu hình (0,914; 0,895; 0,894) vì ít báo nhầm nhất; báo nhầm của các cách còn lại tập trung
+  vào E9, sự kiện chỉ có 1 session train, khi hành vi bình thường đổi (F1 phần phát triển 0,972 nhưng holdout 0,893).
+
+Độ ổn định theo seed: F1 của MỘT model DeepLog + hai luật cũ, trung bình ± độ lệch chuẩn trên 5 seed (cột chia ngẫu nhiên chỉ để
+tham khảo, lý do như trên):
+
+| Cách chấm, tập | Chia thời gian | Chia ngẫu nhiên | Train 2 giờ đầu | Train 3,5 giờ đầu |
+|---|---|---|---|---|
+| Xếp hạng, eval | 0,854 ± 0,055 | 0,764 ± 0,014 | 0,887 ± 0,015 | 0,895 ± 0,020 |
+| **Độ bất ngờ trộn, eval** | 0,924 ± 0,009 | 0,955 ± 0,004 | 0,916 ± 0,002 | 0,918 ± 0,000 |
+| Xếp hạng, holdout | 0,873 ± 0,022 | 0,709 ± 0,004 | 0,884 ± 0,016 | 0,879 ± 0,008 |
+| **Độ bất ngờ trộn, holdout** | 0,893 ± 0,000 | 0,936 ± 0,008 | 0,877 ± 0,002 | 0,878 ± 0,000 |
+
+- Trên eval, cách chấm mới giảm độ lệch chuẩn ở cả 4 cấu hình và một model gần bằng ghép 5 model; trên holdout F1 trung bình tăng
+  ở 2 cấu hình, giảm nhẹ ở 2 cấu hình.
+- Phản hồi khái quát bằng biểu diễn LSTM (cosin trung bình trạng thái ẩn) trên DeepLog trộn, nhãn sau 1 giờ, so với khớp mẫu chính
+  xác (holdout): 0,953 / 0,937 (thời gian), 0,911 / 0,935 (ngẫu nhiên), 0,939 / 0,918 (2 giờ), 0,900 / 0,918 (3,5 giờ). Không
+  nhất quán nên KHÔNG đặt làm mặc định; hơn khớp chính xác khi có drift, kém hơn khi không.
+- Đã thử và không dùng: cập nhật LSTM mỗi giờ bằng log chưa nhãn (phần phát triển 0,858, thua 0,902 của cách đứng yên); giải phóng
+  trạng thái block theo khoảng lặng (block lặng tới 14,9 giờ, cắt ở 12 giờ làm sai 7.720 block).
+- Demo dùng cách chấm mới: `python -m src.stream_demo --score mixed ...`; trùng offline ở 569.276 block.
 
 **Bảng kết quả sinh tự động** — `python -m src.report_tables` đọc kết quả của mọi seed, ensemble, hai cách chia, hai cách
 tune và ba cấu hình độ phủ, rồi ghi `outputs/report_tables/` (`tables.md`, `f1_same_training.csv`,
 `operating_all_selected.csv`, ...). Biến thể và ngưỡng chỉ được chọn trên tập tune; script dừng nếu thiếu seed, cách tune
 hoặc chỉ số. `python -m src.audit_results` kiểm tra nguồn gốc (mục `meta`) của các file kết quả và chuyển file không xác
-minh được vào thư mục archive (không xoá). `python -m unittest discover -s tests` chạy 9 kiểm thử cho các bước chọn ngưỡng,
-ngân sách cảnh báo giả, chia nhóm sự kiện lạ và thiết kế độ phủ thời gian.
+minh được vào thư mục archive (không xoá). `python -m unittest discover -s tests` chạy 29 kiểm thử cho các bước chọn ngưỡng,
+ngân sách cảnh báo giả, chia nhóm sự kiện lạ, thiết kế độ phủ thời gian và bộ phát hiện theo luồng.
 
 ## 6. Kế hoạch
 
@@ -352,4 +447,5 @@ ngân sách cảnh báo giả, chia nhóm sự kiện lạ và thiết kế đ�
 | 2 | Tải HDFS_v1, parse bằng Drain3, dựng chuỗi theo block, chia dữ liệu theo thời gian, phương pháp cổ điển |
 | 3 | Cài đặt và train DeepLog, chọn g và ngưỡng của mọi phương pháp trên tập tune, phân tích lỗi (đã xong) |
 | 4 | Độ ổn định theo seed; xử lý các điểm mù của DeepLog tìm được ở phân tích lỗi; đánh giá theo số cảnh báo giả mỗi giờ, độ trễ phát hiện, drift; đối chứng chia random (đã xong) |
-| 5 | Báo cáo cuối kỳ, slide, demo |
+| 5 | Phát hiện theo luồng: quy tắc không dùng sự kiện tương lai, demo, chọn ngưỡng có tính độ trễ, cách chấm độ bất ngờ trộn tần suất, phản hồi người vận hành, đối chứng không học sâu (đã xong) |
+| 6 trở đi | Bộ log khó hơn (BGL, Thunderbird) để đo giá trị học sâu khi phép đếm không đủ; giảm cảnh báo giả của DeepLog và hiệu chỉnh ngưỡng định kỳ; phân tích ghép model khi train 2 giờ đầu; mô hình Transformer |
