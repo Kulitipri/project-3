@@ -93,3 +93,21 @@ operating:                   # operating_point.py: chọn điểm vận hành th
 time_coverage:
   hours: 2
   time_fraction: 0.1
+
+streaming:                   # bước 12-13: như config.yaml
+  tune_mode: earliest
+  cache_size: 500000
+  sample_lines: 200000
+  confirm_events: [5, 10, 20]      # bước 14: số sự kiện chờ thêm sau khi DeepLog trượt (chọn trên tune, kèm phương án 0)
+  confirm_seconds: [600, 3600]     # thời gian chờ tối đa
+  label_delays_sec: [3600, 21600, 86400]   # nhãn của block bị báo về sau khi phiên kết thúc + delay (số đầu dùng cho demo)
+  holdout_hour: 26                 # bước 15: phiên bắt đầu sau giờ này chỉ dùng để chốt, không dùng để phát triển
+  rare_fractions: [0, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01]   # 'hiếm' = có trong <= tỉ lệ này số session train
+  mix_eps: [0, 0.001, 0.01, 0.05, 0.1, 0.2]
+  surprisal_grid: [4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10, 11, 12, 13, 14]
+  markov_orders: [2, 3, 5]
+  feedback_k: 20
+  feedback_wait: 3600
+  feedback_radius_count: 0.03
+  feedback_radius_lstm: 0.1
+  label_flips: [0.05, 0.1]         # tỉ lệ người vận hành xác nhận sai
